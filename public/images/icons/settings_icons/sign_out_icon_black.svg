@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24.001" viewBox="0 0 24 24.001">
+  <g id="door-open-fill" transform="translate(0 0)">
+    <path id="door-open-fill-2" data-name="door-open-fill" d="M20.25,24H.75a.75.75,0,0,1,0-1.5H3V2.25a.753.753,0,0,1,.645-.742l10.5-1.5A.75.75,0,0,1,15,.75V1.5h.75A2.253,2.253,0,0,1,18,3.75V22.5h2.25a.75.75,0,0,1,0,1.5ZM15,3V22.5h1.5V3.75A.751.751,0,0,0,15.75,3Zm-3.75,9c-.413,0-.75.673-.75,1.5s.336,1.5.75,1.5.75-.673.75-1.5S11.663,12,11.25,12Z" transform="translate(1.5 0)" fill="#000000"/>
+  </g>
+</svg>
