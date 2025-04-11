@@ -1,13 +1,13 @@
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import * as schema from "~/server/db/schema";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import {
   fetchLinkPreview,
   extractDomain,
   getDefaultCoverImage,
   isAllowedDomain,
 } from "../utils/url-helpers";
+import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 
 export interface ArticleCreateInput {
   title: string;
@@ -36,7 +36,7 @@ export interface ArticleOutput {
  * Check if an article with this link already exists
  */
 export async function checkArticleExists(
-  db: PostgresJsDatabase<typeof schema>,
+  db: NeonHttpDatabase<typeof schema>,
   link: string,
 ): Promise<boolean> {
   const existingArticle = await db.query.articles.findFirst({
@@ -50,7 +50,7 @@ export async function checkArticleExists(
  * Insert an article into the database
  */
 export async function createArticle(
-  db: PostgresJsDatabase<typeof schema>,
+  db: NeonHttpDatabase<typeof schema>,
   data: ArticleCreateInput,
 ): Promise<{ success: true }> {
   await db.insert(schema.articles).values({
@@ -70,7 +70,7 @@ export async function createArticle(
  * Get available articles (current date is between start_date and end_date)
  */
 export async function getAvailableArticles(
-  db: PostgresJsDatabase<typeof schema>,
+  db: NeonHttpDatabase<typeof schema>,
 ): Promise<ArticleOutput[] | null> {
   const articlesData = await db.query.articles.findMany({
     where: (articles, { lte, gte, and }) =>
@@ -88,7 +88,7 @@ export async function getAvailableArticles(
  * Process a URL to create an article
  */
 export async function processArticleFromUrl(
-  db: PostgresJsDatabase<typeof schema>,
+  db: NeonHttpDatabase<typeof schema>,
   link: string,
 ): Promise<{ success: boolean; article?: ArticleCreateInput }> {
   // Check if URL is from allowed domains

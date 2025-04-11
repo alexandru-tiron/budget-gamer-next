@@ -1,48 +1,51 @@
 
 
 export type FreeGame = {
-    id: string;
+    id: number;
     name: string;
     cover: string;
     cover_portrait: string;
     description: string;
     developer: string;
-    start_date: EpochTimeStamp;
-    end_date: EpochTimeStamp;
+    start_date: Date;
+    end_date: Date;
     free: boolean;
-    giveaway: boolean;
-    platform_ids: string;
+    platform_ids: string[];
     provider_id: string;
     provider_url: string;
-    publisher: string;
-    release_date: EpochTimeStamp;
+    publisher: string | null;
+    release_date: Date | null;
+    createdAt: Date;
+    updatedAt?: Date |null;    
 };
 
 export type SubscriptionGame = {
+    id: number;
+    name: string;
     cover: string;
     cover_portrait: string;
     description: string;
     developer: string;
-    start_date: EpochTimeStamp;
-    end_date: EpochTimeStamp;
-    giveaway: boolean;
-    id: string;
-    name: string;
-    platform_ids: string;
+    start_date: Date;
+    end_date: Date;
+    platform_ids: string[];
     provider_id: string;
     provider_url: string;
-    publisher: string;
-    release_date: EpochTimeStamp;
+    publisher: string | null;
+    release_date: Date | null;
+    createdAt: Date;
+    updatedAt?: Date |null;    
 }
 
 export type Article = {
-    id: string;
-    cover: string;
+    id: number;
+    title: string;
     description: string;
+    cover: string;
     link: string;
     domain: string;
-    start_date: EpochTimeStamp;
-    end_date: EpochTimeStamp;
-    title: string;
-    uid?: string;
+    start_date: Date;
+    end_date: Date;
+    createdAt: Date;
+    updatedAt?: Date |null;    
 }

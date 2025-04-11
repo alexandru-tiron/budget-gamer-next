@@ -15,6 +15,7 @@ import { processGogGame } from "../utils/gog-helpers";
 import { processHumbleGame } from "../utils/humble-helpers";
 import { processPlayStationGame } from "../utils/playstation-helpers";
 import { createFreeGame } from "../services/freeGames-service";
+import { createSubscriptionGame } from "../services/subscriptionGames-service";
 
 export const parsersRouter = createTRPCRouter({
   // Internal procedure for processing Steam games
@@ -268,7 +269,7 @@ export const parsersRouter = createTRPCRouter({
         const startDate = new Date();
 
         // Create the game
-        await createFreeGame(ctx.db, {
+        await createSubscriptionGame(ctx.db, {
           name: gameDetails.name,
           cover: gameDetails.cover,
           cover_portrait: gameDetails.cover_portrait,
@@ -276,7 +277,6 @@ export const parsersRouter = createTRPCRouter({
           developer: gameDetails.developer,
           publisher: gameDetails.publisher,
           platform_ids: gameDetails.platform_ids,
-          free: gameDetails.free,
           start_date: startDate,
           end_date: endDate,
           provider_id: "playstation",

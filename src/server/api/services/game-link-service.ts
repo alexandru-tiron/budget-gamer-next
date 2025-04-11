@@ -9,6 +9,8 @@ import {
 import { processPlayStationGame } from "../utils/playstation-helpers";
 import { processHumbleGame } from "../utils/humble-helpers";
 import { processGogGame } from "../utils/gog-helpers";
+import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
+import type * as schema from "~/server/db/schema";
 
 // URL validation patterns
 export const urlValidation =
@@ -32,7 +34,7 @@ export function doesLinkMatchRegExp(url: string, regexp: RegExp): boolean {
  */
 export async function processGameLink(
   link: string,
-  dbInstance: typeof db,
+  dbInstance: NeonHttpDatabase<typeof schema>,
 ): Promise<{ success: boolean; provider: string }> {
   // Check if the link is a valid URL
   if (!doesLinkMatchRegExp(link, urlValidation)) {

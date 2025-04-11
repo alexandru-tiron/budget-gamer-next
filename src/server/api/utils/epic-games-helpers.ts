@@ -14,7 +14,7 @@ interface EpicGameDetails {
   start_date: Date;
   end_date: Date;
   provider_url: string;
-  release_date: string;
+  release_date: Date;
 }
 
 // Epic Games API response types
@@ -77,18 +77,6 @@ interface EpicGamesResponse {
       };
     };
   };
-}
-
-/**
- * Format date to DD.MM.YYYY
- */
-function formatDate(date: string): string {
-  const d = new Date(date);
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const year = d.getFullYear();
-
-  return `${day}.${month}.${year}`;
 }
 
 /**
@@ -190,7 +178,7 @@ export async function fetchEpicFreeGames(): Promise<EpicGameDetails[]> {
         start_date: startDate,
         end_date: endDate,
         provider_url: providerUrl,
-        release_date: formatDate(game.effectiveDate),
+        release_date: new Date(game.effectiveDate),
       });
     }
 
@@ -249,7 +237,7 @@ export async function processEpicGames(dbInstance: typeof db): Promise<{
               provider_id: "epic_games",
               provider_url: game.provider_url.replace(/ /g, "%20"),
               publisher: game.publisher,
-              release_date: new Date(game.release_date),
+              release_date: game.release_date,
             })
             .where(eq(freeGames.id, existingGame.id));
 
@@ -269,7 +257,7 @@ export async function processEpicGames(dbInstance: typeof db): Promise<{
             provider_id: "epic_games",
             provider_url: game.provider_url.replace(/ /g, "%20"),
             publisher: game.publisher,
-            release_date: new Date(game.release_date),
+            release_date: game.release_date,
           });
 
           results.added++;

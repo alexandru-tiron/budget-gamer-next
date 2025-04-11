@@ -89,7 +89,7 @@ export async function fetchPsApiGameDetails(
     const response = await fetch(
       `https://store.playstation.com/store/api/chihiro/00_09_000/container/gb/en/999/${gameId}`,
     );
-
+    // console.log(response.json());
     // If API request is successful
     if (response.ok) {
       const data = (await response.json()) as {
@@ -348,12 +348,14 @@ export async function processPlayStationGame(psUrl: string): Promise<{
 
     // Try fetching from API first
     let gameDetails = await fetchPsApiGameDetails(gameId ?? "");
-
+    console.log(gameDetails);
     // If API fails, try scraping the website
-    gameDetails ??= await scrapePsGameDetails(gameId ?? "");
+    if (!gameDetails) {
+      gameDetails = await scrapePsGameDetails(gameId ?? "");
+    }
 
     // If both methods fail or game is not free, return null
-    if (!gameDetails?.free) {
+    if (!gameDetails) {
       return null;
     }
 

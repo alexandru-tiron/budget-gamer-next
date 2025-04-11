@@ -18,14 +18,17 @@ interface HumbleChoiceGameDetails {
   release_date: string;
 }
 
-type HumbleChoiceGameResponse = Record<string, {
+type HumbleChoiceGameResponse = Record<
+  string,
+  {
     title: string;
     image: string;
     recommendation_copy_dict: {
       copy: string;
     };
     platforms: string[];
-  }>;
+  }
+>;
 
 /**
  * Fetch Humble Choice games from the Humble Bundle website
@@ -84,10 +87,11 @@ export async function fetchHumbleChoiceGames(): Promise<
 
       // Add game to array
       humbleGames.push({
-        name: game?.title ?? "" ,
+        name: game?.title ?? "",
         cover: game?.image ?? "",
         cover_portrait: game?.image ?? "",
-        description: game?.recommendation_copy_dict.copy.replace(/<[^>]+>/g, "") ?? "",
+        description:
+          game?.recommendation_copy_dict.copy.replace(/<[^>]+>/g, "") ?? "",
         developer: "",
         publisher: "",
         platform_ids:
@@ -137,7 +141,10 @@ export async function processHumbleChoiceGames(dbInstance: typeof db): Promise<{
 
     // Check if the first game already exists
     const existingGame = await dbInstance.query.subscriptionGames.findFirst({
-      where: eq(subscriptionGames.provider_url, humbleGames[0]?.provider_url ?? ""),
+      where: eq(
+        subscriptionGames.provider_url,
+        humbleGames[0]?.provider_url ?? "",
+      ),
     });
 
     if (existingGame) {

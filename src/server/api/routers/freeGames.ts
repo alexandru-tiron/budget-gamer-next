@@ -41,7 +41,6 @@ export const freeGamesRouter = createTRPCRouter({
     .input(
       z.object({
         link: z.string().min(1),
-        uid: z.string().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {

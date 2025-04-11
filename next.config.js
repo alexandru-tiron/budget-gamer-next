@@ -12,6 +12,18 @@ const config = {
   eslint: {
     ignoreDuringBuilds: true,
   },
+
+  images: {
+    dangerouslyAllowSVG: true,
+    unoptimized: false, // Enables Next.js image optimization
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "**", // Allows optimization for all external images
+      },
+    ],
+    disableStaticImages: false,
+  },
 };
 
 export default config;

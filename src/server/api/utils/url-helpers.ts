@@ -1,4 +1,5 @@
 import { getLinkPreview } from "link-preview-js";
+import { env } from "~/env";
 
 // URL validation patterns
 export const URL_PATTERN =
@@ -172,8 +173,7 @@ export async function fetchRedditArticles(): Promise<string[]> {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization:
-          "Basic el9QZkpHMlhxMENUX0hYVUhRQVFJdzozRjVIczdzNGZKdHBCNVFVUUlrUFk5bGFoNDF6SHc=",
+        Authorization: `Basic ${env.REDDIT_AUTH_TOKEN}=`,
       },
     },
   );

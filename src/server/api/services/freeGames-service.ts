@@ -1,5 +1,5 @@
+import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
 import { freeGames } from "~/server/db/schema";
-import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import type * as schema from "~/server/db/schema";
 
 export interface FreeGameCreateInput {
@@ -19,21 +19,23 @@ export interface FreeGameCreateInput {
 }
 
 export async function createFreeGame(
-  db: PostgresJsDatabase<typeof schema>,
+  db: NeonHttpDatabase<typeof schema>,
   data: FreeGameCreateInput,
 ) {
   const freeGame = await db.insert(freeGames).values(data).returning();
   return freeGame;
 }
 
-
-
-export async function getAvailableFreeGames(db: PostgresJsDatabase<typeof schema>) {
+export async function getAvailableFreeGames(
+  db: NeonHttpDatabase<typeof schema>,
+) {
   const freeGames = await db.query.freeGames.findMany({
     where: (freeGames, { lte, gte, and }) =>
-      and(lte(freeGames.end_date, new Date()), gte(freeGames.start_date, new Date())),
+      and(
+        gte(freeGames.end_date, new Date()),
+        lte(freeGames.start_date, new Date()),
+      ),
   });
 
   return freeGames;
 }
-

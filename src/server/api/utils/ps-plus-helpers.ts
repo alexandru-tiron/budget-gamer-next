@@ -3,6 +3,7 @@ import type { db } from "~/server/db";
 import { subscriptionGames } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
 import { processPlayStationGame } from "./playstation-helpers";
+import { createSubscriptionGame } from "../services/subscriptionGames-service";
 
 /**
  * Helper function to delay execution
@@ -28,10 +29,12 @@ export async function fetchPSPlusGames(): Promise<string[]> {
     );
 
     await page.waitForSelector(
-      ".cmp-experiencefragment--your-latest-monthly-games",
+      ".cmp-experiencefragment--wn-latest-monthly-games",
+      { timeout: 10000 },
     );
     await page.waitForSelector(
       ".txt-style-medium-title.txt-block-paragraph__title",
+      { timeout: 10000 },
     );
     const items = await page.$$(
       ".txt-style-medium-title.txt-block-paragraph__title",
@@ -42,7 +45,7 @@ export async function fetchPSPlusGames(): Promise<string[]> {
       if (item) {
         const titleText = await item.getProperty("innerText");
         const subName = await titleText.jsonValue();
-        if (typeof subName === "string") {
+        if (typeof subName === "string" && !subName.includes("More games")) {
           gameTitlesArray.push(subName);
         }
       }
@@ -151,10 +154,21 @@ export async function processPSPlusGames(dbInstance: typeof db): Promise<{
           console.log(`Game already exists: ${url}`);
           continue;
         }
-
+        // Calculate start date (1st of the current month)
+        const startDate = new Date();
+        startDate.setDate(1); // Set to the 1st of the month
         // Process the game using the existing PlayStation helper
-        await processPlayStationGame(url);
-        results.added++;
+        const result = await processPlayStationGame(url);
+        if (result) {
+          await createSubscriptionGame(dbInstance, {
+            ...result.gameDetails,
+            end_date: result.endDate,
+            start_date: startDate,
+            provider_id: "playstation",
+            provider_url: url,
+          });
+          results.added++;
+        }
       } catch (error) {
         results.failed++;
         const errorMessage =

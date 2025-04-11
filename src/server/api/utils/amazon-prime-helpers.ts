@@ -23,7 +23,7 @@ export async function scrapeAmazonPrimeGames(): Promise<
   AmazonPrimeGameDetails[]
 > {
   const browser = await puppeteer.launch({
-    headless: true,
+    headless: false,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
     defaultViewport: null,
   });
@@ -31,7 +31,7 @@ export async function scrapeAmazonPrimeGames(): Promise<
   try {
     const page = await browser.newPage();
     await page.setViewport({
-      width: 1440,
+      width: 1920,
       height: 1080,
       deviceScaleFactor: 1,
     });
@@ -50,162 +50,199 @@ export async function scrapeAmazonPrimeGames(): Promise<
     const primeGames: AmazonPrimeGameDetails[] = [];
 
     for (const gameHandle of gameHandles) {
-      let description = "";
-      let publisher = "";
-      let provider_url = "https://gaming.amazon.com/home?filter=Game";
-      let isIndexPage = false;
-
-      const cover = await page.evaluate(
-        (el) => el.querySelector("img.tw-image")?.getAttribute("src") ?? "",
-        gameHandle,
-      );
-
-      const title = await page.evaluate(
-        (el) => el.querySelector("h3")?.textContent ?? "",
-        gameHandle,
-      );
-
-      let ageText = await page.evaluate((el) => {
-        const element = el.querySelector("p.tw-c-text-white.tw-font-size-7");
-        return element ? (element.textContent ?? "") : "";
-      }, gameHandle);
-
       try {
-        const url = await page.evaluate(
-          (el) => el.querySelector("a")?.getAttribute("href") ?? "",
+        let description = "";
+        let publisher = "";
+        let developer = "";
+        let release_date = "";
+        let provider_url = "https://gaming.amazon.com/home?filter=Game";
+        let isIndexPage = false;
+
+        let cover = await page.evaluate(
+          (el) =>
+            el.querySelector("figure .tw-image")?.getAttribute("src") ?? "",
           gameHandle,
         );
-        if (url) {
-          provider_url = "https://gaming.amazon.com" + String(url);
-        }
-      } catch (error) {
-        console.log(error, "Error getting provider url");
-        isIndexPage = true;
-      }
 
-      if (isIndexPage) {
-        await page.evaluate((el) => {
-          const imgElement = el.querySelector("img.tw-image");
-          if (imgElement instanceof HTMLElement) {
-            imgElement.click();
-          }
+        const title = await page.evaluate(
+          (el) => el.querySelector("h3")?.textContent ?? "",
+          gameHandle,
+        );
+
+        let ageText = await page.evaluate((el) => {
+          const element = el.querySelector(".availability-date");
+          return element ? (element.textContent ?? "") : "";
         }, gameHandle);
-        const descHandles = await page.$$(".AnimatedShowMore__MainContent");
-
-        for (const descHandle of descHandles) {
-          description = await page.evaluate((el) => {
-            const p = el.querySelector("p");
-            return p ? (p.textContent ?? "") : "";
-          }, descHandle);
-        }
-
-        await page.waitForSelector('[data-a-target="gms-content-supertext"]');
-        const pubHandles = await page.$$(
-          '[data-a-target="gms-content-supertext"]',
-        );
-
-        for (const pubHandle of pubHandles) {
-          publisher = await page.evaluate((el) => {
-            const h2 = el.querySelector("h2");
-            return h2 ? (h2.textContent ?? "") : "";
-          }, pubHandle);
-        }
-      } else {
-        const descPage = await browser.newPage();
-        await descPage.setViewport({
-          width: 1440,
-          height: 1080,
-          deviceScaleFactor: 1,
-        });
-        descPage.setDefaultNavigationTimeout(0);
-        await descPage.goto(`${provider_url}`);
-        await descPage.waitForSelector(
-          "h2.tw-amazon-ember-light.tw-font-size-2",
-        );
 
         try {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          await descPage.hover('[data-a-target="faq-section"]');
+          const url = await page.evaluate(
+            (el) => el.querySelector("a")?.getAttribute("href") ?? "",
+            gameHandle,
+          );
+          if (url) {
+            provider_url = "https://gaming.amazon.com" + String(url);
+          }
         } catch (error) {
-          console.log(error, "Error hovering over FAQ section");
-          // Ignore hover errors
+          console.log(error, "Error getting provider url");
+          isIndexPage = true;
         }
 
-        description = await descPage.evaluate(() => {
-          let par1 = "";
-          let par2 = "";
+        if (isIndexPage) {
+          await page.evaluate((el) => {
+            const imgElement = el.querySelector("img.tw-image");
+            if (imgElement instanceof HTMLElement) {
+              imgElement.click();
+            }
+          }, gameHandle);
+          const descHandles = await page.$$(".AnimatedShowMore__MainContent");
 
+          for (const descHandle of descHandles) {
+            description = await page.evaluate((el) => {
+              const p = el.querySelector("p");
+              return p ? (p.textContent ?? "") : "";
+            }, descHandle);
+          }
+
+          await page.waitForSelector('[data-a-target="gms-content-supertext"]');
+          const pubHandles = await page.$$(
+            '[data-a-target="gms-content-supertext"]',
+          );
+
+          for (const pubHandle of pubHandles) {
+            publisher = await page.evaluate((el) => {
+              const h2 = el.querySelector("h2");
+              return h2 ? (h2.textContent ?? "") : "";
+            }, pubHandle);
+          }
+        } else {
+          const descPage = await browser.newPage();
+          await descPage.setViewport({
+            width: 1920,
+            height: 1080,
+            deviceScaleFactor: 1,
+          });
+          descPage.setDefaultNavigationTimeout(0);
+          console.log(provider_url);
+          await descPage.goto(`${provider_url}`);
+          // try {
+          //   await descPage.waitForSelector(
+          //     "h2.tw-amazon-ember-light.tw-font-size-2",
+          //     { timeout: 5000 },
+          //   );
+          // } catch (error) {
+          //   console.log(error, "Error waiting for FAQ section");
+          //   // Ignore hover errors
+          // }
+          await descPage.waitForSelector(`[data-a-target="faq-section"]`, {
+            timeout: 3000,
+          });
           try {
-            const element = document.querySelector(
-              ".highlight-card__overlay__content",
-            );
-            par1 = element ? (element.textContent ?? "") : "";
+            await descPage.hover('[data-a-target="faq-section"]');
           } catch (error) {
-            console.log(error, "Error getting overlay content");
+            console.log(error, "Error hovering over FAQ section");
+            // Ignore hover errors
+          }
+
+          description = await descPage.evaluate(() => {
+            let par1 = "";
+            let par2 = "";
+
             try {
               const element = document.querySelector(
-                ".highlight-card__overlay",
+                `.about-the-game__content [data-a-target="ExpandableText"]`,
               );
               par1 = element ? (element.textContent ?? "") : "";
             } catch (error) {
               console.log(error, "Error getting overlay content");
               try {
                 const element = document.querySelector(
-                  ".highlight-card__content",
+                  ".highlight-card__overlay",
                 );
                 par1 = element ? (element.textContent ?? "") : "";
               } catch (error) {
                 console.log(error, "Error getting overlay content");
-                // Ignore errors
+                try {
+                  const element = document.querySelector(
+                    ".highlight-card__content",
+                  );
+                  par1 = element ? (element.textContent ?? "") : "";
+                } catch (error) {
+                  console.log(error, "Error getting overlay content");
+                  // Ignore errors
+                }
               }
             }
-          }
 
-          const par1mod = par1.replace("\n\n", ". ");
+            const par1mod = par1.replace("\n\n", ". ");
 
-          try {
-            const element = document.querySelector(
-              "div.tw-font-size-5.tw-typeset p.tw-amazon-ember-light.tw-md-font-size-4",
-            );
-            par2 = element ? (element.innerHTML ?? "") : "";
-            return par1mod + ". " + par2;
-          } catch (error) {
-            console.log(error, "Error getting overlay content");
-            return par1mod;
-          }
+            try {
+              const element = document.querySelector(
+                "div.tw-font-size-5.tw-typeset p.tw-amazon-ember-light.tw-md-font-size-4",
+              );
+              par2 = element ? (element.innerHTML ?? "") : "";
+              return par1mod + ". " + par2;
+            } catch (error) {
+              console.log(error, "Error getting overlay content");
+              return par1mod;
+            }
+          });
+          cover = await descPage.evaluate(
+            () =>
+              document
+                .querySelector("picture.tw-picture img.tw-full-width")
+                ?.getAttribute("src") ?? "",
+          );
+          publisher = await descPage.evaluate(
+            () =>
+              document.querySelector(`[data-a-target="Publisher"]`)
+                ?.textContent ?? "",
+          );
+          developer = await descPage.evaluate(
+            () =>
+              document.querySelector(`[data-a-target="Developer"]`)
+                ?.textContent ?? "",
+          );
+          release_date = await descPage.evaluate(
+            () =>
+              document.querySelector(`[data-a-target="ReleaseDate"]`)
+                ?.textContent ?? "",
+          );
+
+          await descPage.close();
+        }
+
+        // Process age text to get end date
+        if (ageText.includes("Ends today")) {
+          ageText = "1";
+        }
+
+        const daysRemaining = parseInt(
+          ageText.match(/\(in (\d+) days\)/)?.[1] ?? "30",
+        );
+        const endDate = new Date();
+        endDate.setDate(endDate.getDate() + daysRemaining);
+
+        // Set start date to 1st of current month
+        const startDate = new Date();
+        startDate.setDate(1);
+
+        primeGames.push({
+          name: title,
+          cover,
+          cover_portrait: cover,
+          description,
+          developer,
+          publisher,
+          platform_ids: ["windows"],
+          is_free: false,
+          release_date: new Date(release_date),
+          end_date: endDate,
         });
-
-        await descPage.close();
+      } catch (error) {
+        console.log(error, "Error getting game details");
+        continue;
       }
-
-      // Process age text to get end date
-      if (ageText === "Ends today") {
-        ageText = "1";
-      }
-
-      const daysRemaining = parseInt(ageText.replace(/\D/g, "")) || 30;
-      const endDate = new Date();
-      endDate.setDate(endDate.getDate() + daysRemaining);
-
-      // Set start date to 1st of current month
-      const startDate = new Date();
-      startDate.setDate(1);
-
-      primeGames.push({
-        name: title,
-        cover,
-        cover_portrait: cover,
-        description,
-        developer: "",
-        publisher,
-        platform_ids: ["windows"],
-        is_free: false,
-        release_date: startDate,
-        end_date: endDate,
-      });
     }
-
-    await page.close();
     return primeGames;
   } catch (error) {
     console.error("Error scraping Amazon Prime games:", error);
@@ -253,7 +290,9 @@ export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
           console.log(`Game already exists: ${game.name}`);
           continue;
         }
-
+        const startDate = new Date();
+        startDate.setDate(1);
+        console.log(game);
         // Add game to database
         await dbInstance.insert(subscriptionGames).values({
           name: game.name,
@@ -263,7 +302,7 @@ export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
           developer: game.developer,
           publisher: game.publisher,
           platform_ids: game.platform_ids,
-          start_date: game.release_date,
+          start_date: startDate,
           end_date: game.end_date,
           provider_id: "amazon_games",
           provider_url: "https://gaming.amazon.com/home?filter=Game",
