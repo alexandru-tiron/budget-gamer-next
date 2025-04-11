@@ -4,6 +4,7 @@
   <img src="/public/images/icons/Color Favicon.svg" alt="Budget Gamer Logo" width="200"/>
   <h3>Never miss a free game again!</h3>
   <p>A web app to track and discover free games across multiple gaming platforms.</p>
+  <p><a href="https://budget-gamer.vercel.app/">Live Demo</a></p>
 </div>
 
 ## Project Evolution
@@ -142,8 +143,7 @@ The easiest way to deploy Budget Gamer is using Vercel:
 - [x] Set up Neon DB integration
 - [x] Configure Drizzle ORM
 - [x] Add TypeScript support
-- [ ] Set up GitHub Actions for automated tasks
-- [ ] Add scheduled procedures for regular updates
+- [x] Add Vercel cron jobs for regular updates
 - [ ] Implement error handling
 - [ ] Add logging system
 - [ ] Set up monitoring and analytics
@@ -194,5 +194,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - GitHub: [@AlexT](https://github.com/alexandru-tiron)
 - Linkedin: [@AlexT](https://www.linkedin.com/in/alextiron)
-
-
