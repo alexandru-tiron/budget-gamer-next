@@ -7,24 +7,12 @@
   ],
   "crons": [
     {
-      "path": "/api/cron/reddit",
-      "schedule": "0 15 */3 * *"
-    },
-    {
-      "path": "/api/cron/amazon-prime",
-      "schedule": "5 19 * * 3"
-    },
-    {
-      "path": "/api/cron/epic-games",
+      "path": "/api/cron/thursday",
       "schedule": "5 19 * * 4"
     },
     {
-      "path": "/api/cron/humble-choice",
-      "schedule": "5 20 * * 2"
-    },
-    {
-      "path": "/api/cron/ps-plus",
-      "schedule": "0 0 * * 1"
+      "path": "/api/cron/daily",
+      "schedule": "0 0 * * *"
     }
   ]
 }

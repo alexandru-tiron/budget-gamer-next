@@ -16,14 +16,27 @@ export async function GET(req: NextRequest) {
     const ctx = await createTRPCContext({ headers: req.headers });
     const caller = appRouter.createCaller(ctx);
 
-    // Run all scheduled procedures
-    const results = await Promise.allSettled([
-      caller.scheduled.getRedditArticles(),
-      caller.scheduled.getAmazonPrimeGames(),
-      caller.scheduled.getEpicFreeGames(),
-      caller.scheduled.getHumbleChoiceGames(),
-      caller.scheduled.getPSPlusGames(),
-    ]);
+    // Get the cron schedule from the URL path
+    const path = req.nextUrl.pathname;
+    let procedures: Promise<unknown>[] = [];
+
+    if (path.includes("thursday")) {
+      // Thursday at 19:05 - Amazon Prime and Epic Games
+      procedures = [
+        caller.scheduled.getAmazonPrimeGames(),
+        caller.scheduled.getEpicFreeGames(),
+      ];
+    } else {
+      // Daily at midnight - All other procedures
+      procedures = [
+        caller.scheduled.getRedditArticles(),
+        caller.scheduled.getHumbleChoiceGames(),
+        caller.scheduled.getPSPlusGames(),
+      ];
+    }
+
+    // Run the selected procedures
+    const results = await Promise.allSettled(procedures);
 
     // Log results
     const successful = results.filter((r) => r.status === "fulfilled");
@@ -32,6 +45,9 @@ export async function GET(req: NextRequest) {
     return new Response(
       JSON.stringify({
         message: "Cron job completed",
+        schedule: path.includes("thursday")
+          ? "Thursday 19:05"
+          : "Daily midnight",
         successful: successful.length,
         failed: failed.length,
         results: results.map((r): unknown =>
