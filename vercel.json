@@ -5,11 +5,6 @@
       "use": "@vercel/next"
     }
   ],
-  "functions": {
-    "api/**/*.ts": {
-      "memory": 3008
-    }
-  },
   "crons": [
     {
       "path": "/api/cron/reddit",
