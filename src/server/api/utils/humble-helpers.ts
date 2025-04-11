@@ -1,4 +1,5 @@
-import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium-min";
 
 interface HumbleGameDetails {
   name: string;
@@ -74,12 +75,18 @@ export function extractHumbleGameIds(urls: string): {
 export async function fetchHumbleGameDetails(
   gameIds: string,
 ): Promise<HumbleGameDetails | null> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  const browser = await puppeteerCore.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 
   try {
+    if (!browser) {
+      throw new Error("Browser not found");
+    }
+
     const page = await browser.newPage();
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36",

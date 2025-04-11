@@ -1,4 +1,5 @@
-import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium-min";
 
 interface PlayStationGameDetails {
   name: string;
@@ -182,12 +183,17 @@ export async function fetchPsApiGameDetails(
 export async function scrapePsGameDetails(
   gameId: string,
 ): Promise<PlayStationGameDetails | null> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  const browser = await puppeteerCore.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 
   try {
+    if (!browser) {
+      throw new Error("Browser not found");
+    }
     const page = await browser.newPage();
     await page.setViewport({
       width: 1920,
@@ -350,10 +356,7 @@ export async function processPlayStationGame(psUrl: string): Promise<{
     let gameDetails = await fetchPsApiGameDetails(gameId ?? "");
     console.log(gameDetails);
     // If API fails, try scraping the website
-    if (!gameDetails) {
-      gameDetails = await scrapePsGameDetails(gameId ?? "");
-    }
-
+    gameDetails ??= await scrapePsGameDetails(gameId ?? "");
     // If both methods fail or game is not free, return null
     if (!gameDetails) {
       return null;

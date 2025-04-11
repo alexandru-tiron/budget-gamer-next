@@ -1,4 +1,5 @@
-import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium-min";
 import type { db } from "~/server/db";
 import { subscriptionGames } from "~/server/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -22,13 +23,17 @@ interface AmazonPrimeGameDetails {
 export async function scrapeAmazonPrimeGames(): Promise<
   AmazonPrimeGameDetails[]
 > {
-  const browser = await puppeteer.launch({
-    headless: false,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    defaultViewport: null,
+  const browser = await puppeteerCore.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 
   try {
+    if (!browser) {
+      throw new Error("Browser not found");
+    }
     const page = await browser.newPage();
     await page.setViewport({
       width: 1920,
@@ -217,7 +222,7 @@ export async function scrapeAmazonPrimeGames(): Promise<
         }
 
         const daysRemaining = parseInt(
-          ageText.match(/\(in (\d+) days\)/)?.[1] ?? "30",
+          /\(in (\d+) days\)/.exec(ageText)?.[1] ?? "30",
         );
         const endDate = new Date();
         endDate.setDate(endDate.getDate() + daysRemaining);

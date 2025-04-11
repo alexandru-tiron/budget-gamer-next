@@ -1,4 +1,5 @@
-import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium-min";
 
 interface GogGameDetails {
   name: string;
@@ -41,12 +42,17 @@ export async function scrapeGogGamePage(url: string): Promise<{
   isFree: boolean;
   countdownMs: number | null;
 }> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  const browser = await puppeteerCore.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 
   try {
+    if (!browser) {
+      throw new Error("Browser not found");
+    }
     // Open game page
     const page = await browser.newPage();
     await page.setUserAgent(

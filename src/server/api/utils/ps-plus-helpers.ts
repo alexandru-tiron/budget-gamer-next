@@ -1,4 +1,5 @@
-import puppeteer from "puppeteer";
+import puppeteerCore from "puppeteer-core";
+import chromium from "@sparticuz/chromium-min";
 import type { db } from "~/server/db";
 import { subscriptionGames } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
@@ -16,12 +17,17 @@ function delay(ms: number): Promise<void> {
  * Fetch PlayStation Plus games from the PlayStation website
  */
 export async function fetchPSPlusGames(): Promise<string[]> {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  const browser = await puppeteerCore.launch({
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 
   try {
+    if (!browser) {
+      throw new Error("Browser not found");
+    }
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(0);
     await page.goto(
