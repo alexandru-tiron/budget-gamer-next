@@ -1,0 +1,1 @@
+DROP TABLE "budget-gamer-next_post" CASCADE;

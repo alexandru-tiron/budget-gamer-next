@@ -1,5 +1,4 @@
-import puppeteerCore from "puppeteer-core";
-import chromium from "@sparticuz/chromium-min";
+import { getBrowser } from "./puppeteer-helper";
 
 interface GogGameDetails {
   name: string;
@@ -42,15 +41,10 @@ export async function scrapeGogGamePage(url: string): Promise<{
   isFree: boolean;
   countdownMs: number | null;
 }> {
-  const options = {
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  };
+  console.log("Starting GOG games scraping...");
+  console.log("Environment:", process.env.NODE_ENV);
 
-  const browser = await puppeteerCore.launch(options);
+  const browser = await getBrowser();
 
 
   try {
@@ -63,7 +57,9 @@ export async function scrapeGogGamePage(url: string): Promise<{
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36",
     );
     page.setDefaultNavigationTimeout(0);
-    await page.goto(url);
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+    });
     await page.setViewport({
       width: 1920,
       height: 1080,

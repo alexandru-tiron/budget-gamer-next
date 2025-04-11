@@ -1,5 +1,4 @@
-import puppeteerCore from "puppeteer-core";
-import chromium from "@sparticuz/chromium-min";
+import { getBrowser } from "./puppeteer-helper";
 
 interface SteamGameDetails {
   name: string;
@@ -84,16 +83,7 @@ export function extractSteamAppId(url: string): string | null {
  * Scrape end date from Steam store page
  */
 export async function scrapeEndDate(steamUrl: string): Promise<number | null> {
-  const options = {
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  };
-
-  const browser = await puppeteerCore.launch(options);
-
+  const browser = await getBrowser();
 
   try {
     if (!browser) {

@@ -1,10 +1,9 @@
-import puppeteerCore from "puppeteer-core";
-import chromium from "@sparticuz/chromium-min";
 import type { db } from "~/server/db";
 import { subscriptionGames } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
 import { processPlayStationGame } from "./playstation-helpers";
 import { createSubscriptionGame } from "../services/subscriptionGames-service";
+import { getBrowser } from "./puppeteer-helper";
 
 /**
  * Helper function to delay execution
@@ -17,16 +16,7 @@ function delay(ms: number): Promise<void> {
  * Fetch PlayStation Plus games from the PlayStation website
  */
 export async function fetchPSPlusGames(): Promise<string[]> {
-  const options = {
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  };
-
-  const browser = await puppeteerCore.launch(options);
-
+  const browser = await getBrowser();
 
   try {
     if (!browser) {

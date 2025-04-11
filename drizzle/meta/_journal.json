@@ -15,6 +15,13 @@
       "when": 1744375711043,
       "tag": "0001_breezy_grim_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1744385279607,
+      "tag": "0002_last_starhawk",
+      "breakpoints": true
     }
   ]
 }

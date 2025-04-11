@@ -17,7 +17,7 @@ export default function SubcriptionGameList({
   type?: "normal" | "portrait";
 }) {
   return games.length === 0 ? null : (
-    <div className="flex flex-col gap-4 lg:px-8">
+    <div className="flex flex-col gap-4 mb-4 lg:px-8">
       <div className="flex items-center gap-2">
         <Image
           src={`/images/icons/provider_logos/logo_${provider}_black.svg`}

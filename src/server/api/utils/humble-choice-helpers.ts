@@ -1,8 +1,8 @@
-import puppeteerCore from "puppeteer-core";
-import chromium from "@sparticuz/chromium-min";
+
 import type { db } from "~/server/db";
 import { subscriptionGames } from "~/server/db/schema";
 import { eq } from "drizzle-orm";
+import { getBrowser } from "./puppeteer-helper";
 
 interface HumbleChoiceGameDetails {
   name: string;
@@ -37,16 +37,10 @@ type HumbleChoiceGameResponse = Record<
 export async function fetchHumbleChoiceGames(): Promise<
   HumbleChoiceGameDetails[]
 > {
-  const options = {
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  };
+  console.log("Starting Humble Choice games scraping...");
+  console.log("Environment:", process.env.NODE_ENV);
 
-  const browser = await puppeteerCore.launch(options);
-
+  const browser = await getBrowser();
 
   try {
     if (!browser) {
@@ -55,7 +49,9 @@ export async function fetchHumbleChoiceGames(): Promise<
     const page = await browser.newPage();
     page.setDefaultNavigationTimeout(0);
     await page.goto(
-      "https://www.humblebundle.com/membership?hmb_source=search_bar",
+      "https://www.humblebundle.com/membership?hmb_source=search_bar", {
+        waitUntil: "domcontentloaded",
+      },
     );
 
     // Extract the JSON data from the page

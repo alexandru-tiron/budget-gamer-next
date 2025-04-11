@@ -1,5 +1,4 @@
-import puppeteerCore from "puppeteer-core";
-import chromium from "@sparticuz/chromium-min";
+import { getBrowser } from "./puppeteer-helper";
 
 interface HumbleGameDetails {
   name: string;
@@ -75,16 +74,7 @@ export function extractHumbleGameIds(urls: string): {
 export async function fetchHumbleGameDetails(
   gameIds: string,
 ): Promise<HumbleGameDetails | null> {
-  const options = {
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  };
-
-  const browser = await puppeteerCore.launch(options);
-
+  const browser = await getBrowser();
 
   try {
     if (!browser) {

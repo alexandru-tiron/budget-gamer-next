@@ -1,5 +1,5 @@
-import puppeteerCore from "puppeteer-core";
-import chromium from "@sparticuz/chromium-min";
+import { getBrowser } from "./puppeteer-helper";
+
 
 interface PlayStationGameDetails {
   name: string;
@@ -79,7 +79,6 @@ export function extractPsGameIds(url: string): string[] {
 
   return gameIds;
 }
-
 /**
  * Fetch game details from PlayStation Store API
  */
@@ -183,21 +182,13 @@ export async function fetchPsApiGameDetails(
 export async function scrapePsGameDetails(
   gameId: string,
 ): Promise<PlayStationGameDetails | null> {
-  const options = {
-    args: chromium.args,
-    defaultViewport: chromium.defaultViewport,
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
-    ignoreHTTPSErrors: true,
-  };
-
-  const browser = await puppeteerCore.launch(options);
-
+  const browser = await getBrowser();
 
   try {
     if (!browser) {
       throw new Error("Browser not found");
     }
+
     const page = await browser.newPage();
     await page.setViewport({
       width: 1920,
