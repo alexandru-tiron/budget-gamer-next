@@ -183,12 +183,16 @@ export async function fetchPsApiGameDetails(
 export async function scrapePsGameDetails(
   gameId: string,
 ): Promise<PlayStationGameDetails | null> {
-  const browser = await puppeteerCore.launch({
+  const options = {
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
     executablePath: await chromium.executablePath(),
     headless: chromium.headless,
-  });
+    ignoreHTTPSErrors: true,
+  };
+
+  const browser = await puppeteerCore.launch(options);
+
 
   try {
     if (!browser) {

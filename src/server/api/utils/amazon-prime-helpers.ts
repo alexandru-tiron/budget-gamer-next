@@ -23,12 +23,15 @@ interface AmazonPrimeGameDetails {
 export async function scrapeAmazonPrimeGames(): Promise<
   AmazonPrimeGameDetails[]
 > {
-  const browser = await puppeteerCore.launch({
+  const options = {
     args: chromium.args,
     defaultViewport: chromium.defaultViewport,
     executablePath: await chromium.executablePath(),
     headless: chromium.headless,
-  });
+    ignoreHTTPSErrors: true,
+  };
+
+  const browser = await puppeteerCore.launch(options);
 
   try {
     if (!browser) {
