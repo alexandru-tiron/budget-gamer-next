@@ -56,7 +56,7 @@ Budget Gamer started as a vanilla JavaScript project using HTML, CSS, and Fireba
 1. Clone the repository
 
 ```bash
-git clone https://github.com/AlexT8/budget-gamer-next.git
+git clone https://github.com/alexandru-tiron/budget-gamer-next.git
 cd budget-gamer-next
 ```
 
