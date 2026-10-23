@@ -13,7 +13,7 @@ Every option needs the same things:
 | Need                  | Why                                                                                    |
 | --------------------- | -------------------------------------------------------------------------------------- |
 | Postgres 14+          | Any Postgres works; Neon URLs use Neon's HTTP driver, others a regular connection      |
-| Chromium              | The Amazon, GOG, Humble, PlayStation and Steam scrapers drive a headless browser       |
+| Chromium              | The GOG, Humble and Steam scrapers drive a headless browser                            |
 | A scheduler           | Something must call `/api/cron/daily` and `/api/cron/thursday` (Vercel Cron does this on Vercel) |
 | `CRON_SECRET`         | Shared secret the scheduler sends as `Authorization: Bearer <CRON_SECRET>`             |
 | `REDDIT_AUTH_TOKEN`   | Basic-auth token for Reddit's API, used by the daily giveaway search                   |

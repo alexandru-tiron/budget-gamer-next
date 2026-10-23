@@ -14,7 +14,26 @@ export const dynamic = "force-dynamic";
 // 60s is the highest value every Vercel plan accepts; raise it to 300 with fluid compute
 export const maxDuration = 60;
 
+// Stop waiting for slow jobs early enough to report and refresh the pages before the platform
+// kills the function
+const JOB_BUDGET_MS = (maxDuration - 8) * 1000;
+
 type JobOutcome = { ok: true; result: unknown } | { ok: false; error: string };
+
+/**
+ * Reject when `promise` takes longer than `ms`. The job keeps running, but the run no longer
+ * waits for it.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Timed out after ${ms / 1000}s`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 export async function GET(
   req: NextRequest,
@@ -53,12 +72,28 @@ export async function GET(
     return new Response("Not found", { status: 404 });
   }
 
+  // `?job=amazonPrime` runs a single job of the schedule, e.g. to retry it by hand
+  const only = req.nextUrl.searchParams.get("job");
+  if (only !== null) {
+    const job = jobs[only];
+    if (!job) {
+      return Response.json(
+        { error: `Unknown job "${only}"`, jobs: Object.keys(jobs) },
+        { status: 404 },
+      );
+    }
+    jobs = { [only]: job };
+  }
+
   // Run every job, recording a failure instead of stopping the others
   const results = await Promise.all(
     Object.entries(jobs).map(
       async ([name, job]): Promise<[string, JobOutcome]> => {
         try {
-          return [name, { ok: true, result: await job() }];
+          return [
+            name,
+            { ok: true, result: await withTimeout(job(), JOB_BUDGET_MS) },
+          ];
         } catch (error) {
           const message =
             error instanceof Error ? error.message : String(error);

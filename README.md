@@ -148,16 +148,16 @@ The easiest way to deploy Budget Gamer is using Vercel:
 [vercel.json](vercel.json) defines two cron jobs, both served by `src/app/api/cron/[schedule]/route.ts`:
 
 - `/api/cron/daily` (midnight UTC): Reddit giveaway articles, Humble Choice, PlayStation Plus, Xbox Game Pass additions, Xbox Free Play Days, Xbox giveaways and Nintendo Switch Online Game Trials
-- `/api/cron/thursday` (19:05 UTC): Amazon Prime Gaming, Epic Games and the new Xbox Free Play Days
+- `/api/cron/thursday` (19:05 UTC): Amazon Prime Gaming (now part of Amazon Luna), Epic Games and the new Xbox Free Play Days
 
 Xbox and Nintendo use the European stores (Ireland, prices in EUR). What counts as free:
 
 - **Free games** (free to keep): Xbox and Nintendo eShop games whose price drops to €0 from a paid price. Nintendo rarely does this, so eShop games are only checked when someone submits a link.
 - **Timed**: Xbox Game Pass additions, Xbox Free Play Days weekends (some need Game Pass) and Nintendo Switch Online Game Trials. You can play these for a while but don't keep them.
 
-Vercel authenticates them with `CRON_SECRET`. After each run, the cron route revalidates the pages; they also regenerate at least once an hour.
+Vercel authenticates them with `CRON_SECRET`. Each job gets 52 seconds, so one slow store can't stop the others from saving or the run from finishing within Vercel's 60-second limit. After each run, the cron route revalidates the pages; they also regenerate at least once an hour. Add `?job=<name>` to run a single job by hand (see [docs/API.md](docs/API.md#cron-endpoints)).
 
-The scrapers use Puppeteer. Locally they use Puppeteer's bundled Chrome. On Vercel they use [`@sparticuz/chromium-min`](https://github.com/Sparticuz/chromium), which downloads a Chromium pack on cold start (set `CHROMIUM_PACK_URL` to host your own copy). The Docker image ships Debian's Chromium and points `CHROMIUM_EXECUTABLE_PATH` at it.
+Most feeds are plain HTTP requests. The GOG, Humble and Steam scrapers use Puppeteer: locally they use Puppeteer's bundled Chrome. On Vercel they use [`@sparticuz/chromium-min`](https://github.com/Sparticuz/chromium), which downloads a Chromium pack on cold start (set `CHROMIUM_PACK_URL` to host your own copy). The Docker image ships Debian's Chromium and points `CHROMIUM_EXECUTABLE_PATH` at it.
 
 ### Self-hosting
 

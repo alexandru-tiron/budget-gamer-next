@@ -186,10 +186,10 @@ such as `{ total, added, updated, failed, errors }`.
 | Procedure              | Source                                                       | Writes to           |
 | ---------------------- | ------------------------------------------------------------ | ------------------- |
 | `getRedditArticles`    | r/GiftofGames, r/FreeGameFindings, r/steam_giveaway (last day) | `articles`        |
-| `getAmazonPrimeGames`  | gaming.amazon.com                                            | `subscriptionGames` |
+| `getAmazonPrimeGames`  | Amazon Luna's free games with Prime (luna.amazon.com/claims) | `subscriptionGames` |
 | `getEpicFreeGames`     | Epic Games free games promotions API                         | `freeGames`         |
 | `getHumbleChoiceGames` | humblebundle.com/membership (replaces last month's list)     | `subscriptionGames` |
-| `getPSPlusGames`       | playstation.com PS Plus monthly games                        | `subscriptionGames` |
+| `getPSPlusGames`       | playstation.com PS Plus monthly games, matched to PlayStation Store products | `subscriptionGames` |
 | `getXboxGamePassGames` | Game Pass "Recently added" list, listed while Microsoft shows it | `subscriptionGames` |
 | `getXboxFreePlayDays`  | Latest Xbox Wire Free Play Days post, listed until the weekend ends | `subscriptionGames` |
 | `getXboxGiveaways`     | Store links in recent Xbox Wire posts that are free to keep  | `freeGames`         |
@@ -211,11 +211,25 @@ To trigger one by hand:
 curl -H "Authorization: Bearer $CRON_SECRET" https://budget-gamer.vercel.app/api/cron/thursday
 ```
 
+Add `?job=<name>` to run only one job of the schedule, for example to retry a store that failed:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" "https://budget-gamer.vercel.app/api/cron/thursday?job=amazonPrime"
+```
+
+| Schedule   | Jobs                                                                                                  |
+| ---------- | ----------------------------------------------------------------------------------------------------- |
+| `daily`    | `redditArticles`, `humbleChoice`, `psPlus`, `xboxGamePass`, `xboxFreePlayDays`, `xboxGiveaways`, `nintendoGameTrials` |
+| `thursday` | `amazonPrime`, `epicGames`, `xboxFreePlayDays`                                                        |
+
+Each job gets 52 seconds. A job that takes longer is reported as failed (`"Timed out after 52s"`)
+so the run can still answer, and refresh the pages, within Vercel's 60-second limit.
+
 | Status | Meaning                                                                    |
 | ------ | -------------------------------------------------------------------------- |
 | `200`  | Every job succeeded                                                        |
 | `401`  | Missing or wrong secret                                                    |
-| `404`  | Unknown schedule                                                           |
+| `404`  | Unknown schedule, or a `?job=` the schedule doesn't have (the body lists its jobs) |
 | `500`  | At least one job failed; the others still ran and their results are kept |
 
 The response body contains each job's outcome:

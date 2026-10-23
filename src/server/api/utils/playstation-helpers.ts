@@ -1,10 +1,10 @@
 import { normalizePlatformIds } from "./platforms";
-import { getBrowser, newPage } from "./puppeteer-helper";
+import { fetchText } from "./http";
 import { logger } from "~/server/logger";
 
 const log = logger.child({ scope: "playstation" });
 
-interface PlayStationGameDetails {
+export interface PlayStationGameDetails {
   name: string;
   cover: string;
   cover_portrait: string;
@@ -16,39 +16,14 @@ interface PlayStationGameDetails {
   release_date: Date | null;
 }
 
-// Interfaces for scraping results
-interface GameMediaData {
-  cache: Record<
-    string,
-    {
-      name: string;
-      media: Array<{
-        role: string;
-        url: string;
-      }>;
-    }
-  >;
-}
-
-interface GameDetailsData {
-  cache: Record<
-    string,
-    {
-      descriptions: Array<{
-        type: string;
-        value: string;
-      }>;
-      releaseDate: string;
-      publisherName: string;
-      platforms: string[];
-    }
-  >;
-}
-
-interface GamePriceData {
-  offers?: {
-    price?: number;
-  };
+// The product page's server-rendered Apollo cache entry for the product
+interface StoreProduct {
+  name?: string;
+  media?: { role?: string; url?: string }[];
+  descriptions?: { type?: string; value?: string }[];
+  releaseDate?: string;
+  publisherName?: string;
+  platforms?: string[];
 }
 
 /**
@@ -89,8 +64,8 @@ export async function fetchPsApiGameDetails(
     const response = await fetch(
       `https://store.playstation.com/store/api/chihiro/00_09_000/container/gb/en/999/${gameId}`,
     );
-    // If API request is successful
-    if (response.ok) {
+    // The legacy API now answers most products with an empty 204
+    if (response.ok && response.status !== 204) {
       // Legacy API, so treat every field as optional
       const data = (await response.json()) as {
         name?: string;
@@ -168,142 +143,81 @@ export async function fetchPsApiGameDetails(
 }
 
 /**
- * Scrape game details from PlayStation Store website when API fails
+ * Read the product's details from a PlayStation Store product page. The page embeds its Apollo
+ * cache as JSON blobs, and the price as JSON-LD.
+ */
+export function parsePsProductPage(
+  html: string,
+  gameId: string,
+): PlayStationGameDetails | null {
+  const productKey = `Product:${gameId}`;
+  let product: StoreProduct | undefined;
+  let price: number | undefined;
+
+  for (const [, body = ""] of html.matchAll(
+    /<script[^>]*type="application\/(?:json|ld\+json)"[^>]*>([\s\S]*?)<\/script>/g,
+  )) {
+    let data: unknown;
+    try {
+      data = JSON.parse(body);
+    } catch {
+      continue; // Not JSON, keep looking
+    }
+    if (!data || typeof data !== "object") continue;
+
+    // Each blob holds part of the product, so merge them
+    const cache = (data as { cache?: Record<string, StoreProduct> }).cache;
+    const entry = cache?.[productKey];
+    if (entry) product = { ...product, ...entry };
+
+    const offerPrice = (data as { offers?: { price?: unknown } }).offers?.price;
+    if (typeof offerPrice === "number") price = offerPrice;
+  }
+
+  if (!product?.name) return null;
+
+  const media = product.media ?? [];
+  const imageFor = (role: string) =>
+    media.find((image) => image.role === role)?.url ?? "";
+  const coverPortrait = imageFor("MASTER");
+  const cover = imageFor("GAMEHUB_COVER_ART") || coverPortrait;
+
+  const description =
+    product.descriptions
+      ?.find((desc) => desc.type === "LONG")
+      // Keep line breaks, drop the rest of the markup
+      ?.value?.replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]+>/g, "") ?? "";
+  const publisher = product.publisherName?.trim() ?? "";
+
+  return {
+    name: product.name,
+    cover,
+    cover_portrait: coverPortrait,
+    description,
+    developer: publisher, // The store only lists the publisher
+    publisher,
+    platform_ids: normalizePlatformIds(product.platforms ?? []),
+    free: price === 0,
+    release_date: parseDate(product.releaseDate),
+  };
+}
+
+/**
+ * Get game details from the PlayStation Store product page
  */
 export async function scrapePsGameDetails(
   gameId: string,
 ): Promise<PlayStationGameDetails | null> {
-  const browser = await getBrowser();
-
   try {
-    const page = await newPage(browser);
-    await page.goto(`https://store.playstation.com/en-gb/product/${gameId}/`);
-    await page.waitForSelector("script", { timeout: 2000 });
-
-    // Extract media (images and game name)
-    const gameMediaRaw = await page.evaluate(() => {
-      const scriptTags = document.querySelectorAll("script");
-      for (const scriptTag of Array.from(scriptTags)) {
-        if (
-          scriptTag.innerHTML.includes("media") &&
-          scriptTag.innerHTML.includes("cache")
-        ) {
-          try {
-            return JSON.parse(scriptTag.innerHTML) as GameMediaData;
-          } catch {
-            // Not the JSON payload, keep looking
-          }
-        }
-      }
-      return null;
-    });
-
-    if (!gameMediaRaw) return null;
-
-    // Extract game details (description, release date, publisher, platforms)
-    const gameDetailsRaw = await page.evaluate(() => {
-      const scriptTags = document.querySelectorAll("script");
-      for (const scriptTag of Array.from(scriptTags)) {
-        if (
-          scriptTag.innerHTML.includes("Description") &&
-          scriptTag.innerHTML.includes("cache")
-        ) {
-          try {
-            return JSON.parse(scriptTag.innerHTML) as GameDetailsData;
-          } catch {
-            // Not the JSON payload, keep looking
-          }
-        }
-      }
-      return null;
-    });
-
-    if (!gameDetailsRaw) {
-      return null;
-    }
-
-    // Extract price information
-    const gamePriceRaw = await page.evaluate(() => {
-      const scriptTags = document.querySelectorAll("script");
-      for (const scriptTag of Array.from(scriptTags)) {
-        if (scriptTag.innerHTML.includes("price")) {
-          try {
-            return JSON.parse(scriptTag.innerHTML) as GamePriceData;
-          } catch {
-            // Not the JSON payload, keep looking
-          }
-        }
-      }
-      return null;
-    });
-
-    if (!gamePriceRaw) {
-      return null;
-    }
-
-    // Extract name and images
-    const productKey = `Product:${gameId}`;
-
-    const name = gameMediaRaw.cache[productKey]?.name ?? "";
-    const imageLinks = gameMediaRaw.cache[productKey]?.media ?? [];
-
-    let cover = "";
-    let coverPortrait = "";
-
-    for (const image of imageLinks) {
-      if (image.role === "MASTER") {
-        coverPortrait = image.url;
-      }
-      if (image.role === "GAMEHUB_COVER_ART") {
-        cover = image.url;
-      }
-    }
-
-    // If cover wasn't found, use cover_portrait as fallback
-    if (!cover && coverPortrait) {
-      cover = coverPortrait;
-    }
-
-    // Extract description
-    let description = "";
-    const descriptions = gameDetailsRaw.cache[productKey]?.descriptions ?? [];
-
-    for (const desc of descriptions) {
-      if (desc.type === "LONG") {
-        description = desc.value.replace(/<[^>]+>/g, "");
-        break;
-      }
-    }
-
-    // Extract other details
-    const releaseDate = parseDate(
-      gameDetailsRaw.cache[productKey]?.releaseDate,
+    const html = await fetchText(
+      `https://store.playstation.com/en-gb/product/${gameId}`,
+      { headers: { "accept-language": "en-GB,en;q=0.9" } },
     );
-    const publisher = gameDetailsRaw.cache[productKey]?.publisherName ?? "";
-    const platformIds = normalizePlatformIds(
-      gameDetailsRaw.cache[productKey]?.platforms ?? [],
-    );
-
-    // Check if game is free
-    const price = gamePriceRaw.offers?.price ?? -1; // Default to -1 if price is undefined
-    const isFree = price === 0;
-
-    return {
-      name,
-      cover,
-      cover_portrait: coverPortrait,
-      description,
-      developer: publisher, // Using publisher as developer since it's often the same
-      publisher,
-      platform_ids: platformIds,
-      free: isFree,
-      release_date: releaseDate,
-    };
+    return parsePsProductPage(html, gameId);
   } catch (error) {
     log.error("Error scraping PlayStation game details", { error });
     return null;
-  } finally {
-    await browser.close();
   }
 }
 
@@ -325,10 +239,10 @@ export async function processPlayStationGame(psUrl: string): Promise<{
       throw new Error("Could not extract game ID from URL");
     }
 
-    // Try fetching from API first, then fall back to scraping the website
+    // The store page has the most complete details; the legacy API is a fallback
     const gameDetails =
-      (await fetchPsApiGameDetails(gameId)) ??
-      (await scrapePsGameDetails(gameId));
+      (await scrapePsGameDetails(gameId)) ??
+      (await fetchPsApiGameDetails(gameId));
 
     // If both methods fail, return null
     if (!gameDetails) {

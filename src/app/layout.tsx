@@ -48,7 +48,7 @@ export default function RootLayout({
           <main
             id="main-content"
             tabIndex={-1}
-            className="min-h-screen flex-1 pt-16 pb-20 focus:outline-none lg:ml-84 lg:max-w-[78rem]"
+            className="min-h-screen flex-1 pt-16 pb-28 focus:outline-none lg:ml-84 lg:max-w-[78rem] lg:pb-12"
           >
             {children}
           </main>

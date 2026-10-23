@@ -4,23 +4,68 @@ export const BROWSER_USER_AGENT =
 
 const TIMEOUT_MS = 20_000;
 
-async function request(url: string): Promise<Response> {
+/**
+ * Fetch with a browser user agent, failing on non-2xx responses and after 20 seconds. Headers in
+ * `init` are added to the user agent.
+ */
+export async function fetchOk(
+  url: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const headers = new Headers(init.headers);
+  if (!headers.has("user-agent")) {
+    headers.set("user-agent", BROWSER_USER_AGENT);
+  }
   const response = await fetch(url, {
-    headers: { "user-agent": BROWSER_USER_AGENT },
+    ...init,
+    headers,
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`GET ${url} failed with ${response.status}`);
+    throw new Error(
+      `${init.method ?? "GET"} ${url} failed with ${response.status}`,
+    );
   }
   return response;
 }
 
-/** GET a page as text, failing on non-2xx responses and after 20 seconds. */
-export async function fetchText(url: string): Promise<string> {
-  return (await request(url)).text();
+/** Fetch a page as text, failing on non-2xx responses and after 20 seconds. */
+export async function fetchText(
+  url: string,
+  init?: RequestInit,
+): Promise<string> {
+  return (await fetchOk(url, init)).text();
 }
 
-/** GET a JSON document, failing on non-2xx responses and after 20 seconds. */
-export async function fetchJson<T>(url: string): Promise<T> {
-  return (await request(url)).json() as Promise<T>;
+/** Fetch a JSON document, failing on non-2xx responses and after 20 seconds. */
+export async function fetchJson<T>(
+  url: string,
+  init?: RequestInit,
+): Promise<T> {
+  return (await fetchOk(url, init)).json() as Promise<T>;
+}
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+/** Decode the HTML entities that show up in scraped text, e.g. `&amp;` and `&#8217;`. */
+export function decodeHtmlEntities(text: string): string {
+  return text.replace(
+    /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
+    (entity, code: string) => {
+      if (code.startsWith("#x") || code.startsWith("#X")) {
+        return String.fromCodePoint(parseInt(code.slice(2), 16));
+      }
+      if (code.startsWith("#")) {
+        return String.fromCodePoint(parseInt(code.slice(1), 10));
+      }
+      return NAMED_ENTITIES[code.toLowerCase()] ?? entity;
+    },
+  );
 }

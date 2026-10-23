@@ -7,103 +7,133 @@ import {
   findSubscriptionGameByUrl,
   upsertSubscriptionGame,
 } from "../services/subscriptionGames-service";
-import { delay, getBrowser, newPage } from "./puppeteer-helper";
+import { decodeHtmlEntities, fetchJson, fetchText } from "./http";
 import { logger } from "~/server/logger";
 
 const log = logger.child({ scope: "ps-plus" });
 
+const PS_PLUS_PAGE_URL = "https://www.playstation.com/en-gb/ps-plus/whats-new/";
+const MONTHLY_GAMES_SECTION = "cmp-experiencefragment--wn-latest-monthly-games";
+
+const STORE_GRAPHQL_URL = "https://web.np.playstation.com/api/graphql/v1/op";
+// The store only runs registered queries; this is the one its search page sends. If Sony changes
+// it, search errors out, and the new hash shows up in the store's search requests.
+const SEARCH_QUERY_HASH =
+  "4df6284f982e57bec70f23c77e2c219dc792eb19af7fb3d3a81767aa3f1958aa";
+
+export interface StoreSearchResult {
+  __typename?: string;
+  id?: string;
+  name?: string;
+  storeDisplayClassification?: string | null;
+  price?: {
+    upsellServiceBranding?: string[] | null;
+    upsellText?: string | null;
+  } | null;
+}
+
+interface StoreSearchResponse {
+  data?: {
+    universalSearch?: { results?: StoreSearchResult[] | null } | null;
+  } | null;
+  errors?: { message?: string }[];
+}
+
 /**
- * Fetch PlayStation Plus games from the PlayStation website
+ * Titles in the "Your latest monthly games" section of the PS Plus "What's new" page.
+ */
+export function parseMonthlyGameTitles(html: string): string[] {
+  const start = html.indexOf(MONTHLY_GAMES_SECTION);
+  if (start === -1) return [];
+
+  // The section ends where the next one (game trials, classics...) starts
+  const nextSection = /cmp-experiencefragment--wn-(?!latest-monthly-games)/g;
+  nextSection.lastIndex = start;
+  const end = nextSection.exec(html)?.index ?? html.length;
+
+  return [
+    ...html
+      .slice(start, end)
+      .matchAll(/txt-block-paragraph__title"[^>]*>([^<]+)</g),
+  ]
+    .map(([, title = ""]) => decodeHtmlEntities(title).trim())
+    .filter((title) => title && !title.startsWith("More games"));
+}
+
+/**
+ * The search result that is this month's game: the one the store labels "Essential", the PS Plus
+ * tier monthly games come with, preferring the full game over add-ons and packs.
+ */
+export function pickMonthlyGame(results: StoreSearchResult[]): string | null {
+  const essential = results.filter(
+    (result) =>
+      result.__typename === "Product" &&
+      result.id &&
+      result.price?.upsellText === "Essential" &&
+      result.price.upsellServiceBranding?.includes("PS_PLUS"),
+  );
+  const game =
+    essential.find(
+      (result) => result.storeDisplayClassification === "FULL_GAME",
+    ) ?? essential[0];
+  return game?.id ?? null;
+}
+
+async function searchStore(searchTerm: string): Promise<StoreSearchResult[]> {
+  const params = new URLSearchParams({
+    operationName: "getSearchResults",
+    variables: JSON.stringify({
+      searchTerm,
+      countryCode: "GB",
+      languageCode: "en",
+      pageOffset: 0,
+      pageSize: 10,
+    }),
+    extensions: JSON.stringify({
+      persistedQuery: { version: 1, sha256Hash: SEARCH_QUERY_HASH },
+    }),
+  });
+
+  const response = await fetchJson<StoreSearchResponse>(
+    `${STORE_GRAPHQL_URL}?${params}`,
+    {
+      headers: {
+        "content-type": "application/json",
+        "x-apollo-operation-name": "getSearchResults",
+        "x-psn-store-locale-override": "en-GB",
+      },
+    },
+  );
+
+  const results = response.data?.universalSearch?.results;
+  if (!results) {
+    const message = response.errors?.[0]?.message ?? "no results";
+    throw new Error(`PlayStation Store search failed: ${message}`);
+  }
+  return results;
+}
+
+/**
+ * Store links for this month's PlayStation Plus games
  */
 export async function fetchPSPlusGames(): Promise<string[]> {
-  const browser = await getBrowser();
-
-  try {
-    const page = await newPage(browser);
-    await page.goto(
-      "https://www.playstation.com/en-gb/ps-plus/whats-new/#monthly-games",
-    );
-
-    await page.waitForSelector(
-      ".cmp-experiencefragment--wn-latest-monthly-games",
-    );
-    await page.waitForSelector(
-      ".txt-style-medium-title.txt-block-paragraph__title",
-    );
-    const items = await page.$$(
-      ".txt-style-medium-title.txt-block-paragraph__title",
-    );
-
-    const gameTitlesArray: string[] = [];
-    for (const item of items) {
-      const titleText = await item.getProperty("innerText");
-      const subName = await titleText.jsonValue();
-      if (typeof subName === "string" && !subName.includes("More games")) {
-        gameTitlesArray.push(subName.trim());
-      }
-    }
-
-    log.info("Found PS Plus game titles", { gameTitlesArray });
-    const gameUrls = new Set<string>();
-
-    // Reuse one tab for every search
-    const searchPage = await newPage(browser);
-    for (const gameTitle of gameTitlesArray) {
-      await searchPage.goto(
-        `https://store.playstation.com/en-gb/search/${encodeURIComponent(gameTitle)}`,
-      );
-      await searchPage.waitForSelector(".psw-grid-list.psw-l-grid");
-      await delay(200);
-      await searchPage.hover(".psw-grid-list.psw-l-grid");
-      const searchResults = await searchPage.$$(".psw-grid-list.psw-l-grid li");
-
-      for (const game of searchResults) {
-        const firstResultDiv = await game.$("div");
-        const firstResultDivA = await firstResultDiv?.$("a");
-
-        if (firstResultDivA) {
-          const telemetryMeta = await firstResultDivA.evaluate((el) =>
-            el.getAttribute("data-telemetry-meta"),
-          );
-          if (telemetryMeta) {
-            try {
-              interface TelemetryData {
-                id: string;
-                [key: string]: unknown;
-              }
-              const gameResponse = JSON.parse(telemetryMeta) as TelemetryData;
-              const gameId = gameResponse.id;
-
-              const querySection = await game.$eval(
-                "div > a > div > section",
-                (section) => {
-                  const divs = section.querySelectorAll("div");
-                  return divs[0]?.innerText ?? "";
-                },
-              );
-
-              if (querySection === "Essential") {
-                log.info("Found essential game", { gameId });
-                gameUrls.add(
-                  `https://store.playstation.com/en-gb/product/${gameId}`,
-                );
-              }
-            } catch (error) {
-              log.error("Error parsing game data", { error });
-            }
-          }
-        }
-      }
-    }
-    await searchPage.close();
-
-    return [...gameUrls];
-  } catch (error) {
-    log.error("Error fetching PS Plus games", { error });
-    throw error;
-  } finally {
-    await browser.close();
+  const titles = parseMonthlyGameTitles(await fetchText(PS_PLUS_PAGE_URL));
+  if (titles.length === 0) {
+    throw new Error("No monthly games found on the PS Plus page");
   }
+  log.info("Found PS Plus game titles", { titles });
+
+  const gameUrls = new Set<string>();
+  for (const title of titles) {
+    const gameId = pickMonthlyGame(await searchStore(title));
+    if (gameId) {
+      gameUrls.add(`https://store.playstation.com/en-gb/product/${gameId}`);
+    } else {
+      log.warn("No PS Plus Essential result for monthly game", { title });
+    }
+  }
+
+  return [...gameUrls];
 }
 
 /**

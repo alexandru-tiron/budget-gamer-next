@@ -1,164 +1,187 @@
 import type { db } from "~/server/db";
 import { upsertSubscriptionGame } from "../services/subscriptionGames-service";
-import { getBrowser, mapWithConcurrency, newPage } from "./puppeteer-helper";
+import { fetchJson, fetchOk } from "./http";
 import { logger } from "~/server/logger";
 
 const log = logger.child({ scope: "amazon-prime" });
 
-const PRIME_GAMING_URL = "https://gaming.amazon.com/home?filter=Game";
+// Prime Gaming moved into Amazon Luna. Its claims page loads the free games from this GraphQL API,
+// which accepts plain requests once they carry the page's CSRF token and session cookies.
+const LUNA_CLAIMS_URL = "https://luna.amazon.com/claims/home";
+const LUNA_GRAPHQL_URL = "https://luna.amazon.com/graphql";
 
-interface AmazonPrimeGameDetails {
+// Without a page size the API only returns the first 12 games
+const PAGE_SIZE = 100;
+
+const FREE_GAMES_QUERY = `query FreeGames($collectionType: ItemCollectionType, $pageSize: Int) {
+  items(collectionType: $collectionType, pageSize: $pageSize) {
+    items {
+      category
+      assets {
+        title
+        shortformDescription
+        externalClaimLink
+        cardMedia { defaultMedia { src2x } }
+      }
+      offers { startTime endTime }
+      game {
+        assets {
+          publisher
+          primaryDeveloper
+          releaseDate
+          longformDescription
+          heroMedia { defaultMedia { src2x } }
+        }
+      }
+    }
+  }
+}`;
+
+interface LunaMedia {
+  defaultMedia?: { src2x?: string | null } | null;
+}
+
+export interface LunaItem {
+  category?: string | null;
+  assets?: {
+    title?: string | null;
+    shortformDescription?: string | null;
+    externalClaimLink?: string | null;
+    cardMedia?: LunaMedia | null;
+  } | null;
+  offers?: { startTime?: string | null; endTime?: string | null }[] | null;
+  game?: {
+    assets?: {
+      publisher?: string | null;
+      primaryDeveloper?: string | null;
+      releaseDate?: string | null;
+      longformDescription?: string | null;
+      heroMedia?: LunaMedia | null;
+    } | null;
+  } | null;
+}
+
+interface LunaResponse {
+  data?: { items?: { items?: LunaItem[] | null } | null } | null;
+  errors?: { message?: string }[];
+}
+
+export interface PrimeGamingGame {
   name: string;
   cover: string;
   cover_portrait: string;
   description: string;
   developer: string;
   publisher: string;
-  platform_ids: string[];
   release_date: Date | null;
+  start_date: Date;
   end_date: Date;
   provider_url: string;
 }
 
+function parseDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+// Luna leaves many fields empty or null, so take the first one that is filled in
+function firstFilled(...values: (string | null | undefined)[]): string {
+  return values.map((value) => value?.trim()).find(Boolean) ?? "";
+}
+
 /**
- * Scrape Amazon Prime games from the gaming.amazon.com website
+ * Turn Luna's free game items into games, skipping in-game loot, incomplete items and offers
+ * that already ended.
  */
-export async function scrapeAmazonPrimeGames(): Promise<
-  AmazonPrimeGameDetails[]
-> {
-  log.info("Starting Amazon Prime games scraping...");
-  const startTime = Date.now();
+export function parseLunaItems(
+  items: LunaItem[],
+  now: Date = new Date(),
+): PrimeGamingGame[] {
+  const games: PrimeGamingGame[] = [];
 
-  const browser = await getBrowser();
-
-  try {
-    const page = await newPage(browser);
-
-    log.info("Navigating to Amazon Prime Gaming page...");
-    await page.goto(PRIME_GAMING_URL, {
-      waitUntil: "domcontentloaded",
-    });
-
-    // Wait for game cards with a shorter timeout
-    try {
-      await page.waitForSelector(".item-card__action", {
-        timeout: 5000,
-      });
-    } catch (error) {
-      log.debug("Game cards not found, trying alternative selector", {
-        error,
-      });
-      try {
-        await page.waitForSelector(".tw-block .item-card__action", {
-          timeout: 3000,
-        });
-      } catch (error) {
-        log.debug(
-          "Alternative selector not found, proceeding with available elements",
-          { error },
-        );
-      }
+  for (const item of items) {
+    const name = item.assets?.title?.trim();
+    const claimLink = item.assets?.externalClaimLink;
+    const offer = item.offers?.[0];
+    const endDate = parseDate(offer?.endTime);
+    if (item.category !== "FULL_GAME" || !name || !claimLink || !endDate) {
+      continue;
     }
+    if (endDate <= now || !URL.canParse(claimLink)) continue;
 
-    // Extract basic info from every card first
-    const cards = await page.$$eval(".item-card__action", (elements) =>
-      elements.map((el) => ({
-        title: el.querySelector("h3")?.textContent?.trim() ?? "",
-        cover:
-          el.querySelector('img[src*="images"]')?.getAttribute("src") ?? "",
-        href: el.querySelector("a")?.getAttribute("href") ?? "",
-      })),
-    );
-    log.info(`Found ${cards.length} game cards`);
+    // Claim links carry tracking parameters; the path alone identifies the game
+    const url = new URL(claimLink);
+    const providerUrl = `${url.origin}${url.pathname}`;
 
-    const validCards = cards.filter((card) => card.title && card.href);
+    const gameAssets = item.game?.assets;
+    const card = item.assets?.cardMedia?.defaultMedia?.src2x;
+    const hero = gameAssets?.heroMedia?.defaultMedia?.src2x;
+    const publisher = firstFilled(gameAssets?.publisher);
 
-    // Open detail pages a few at a time to keep memory use low
-    const results = await mapWithConcurrency(
-      validCards,
-      3,
-      async (card): Promise<AmazonPrimeGameDetails | null> => {
-        const provider_url = new URL(card.href, PRIME_GAMING_URL).toString();
-        const descPage = await newPage(browser);
-
-        try {
-          await descPage.goto(provider_url, {
-            waitUntil: "domcontentloaded",
-          });
-
-          const details = await descPage.evaluate(() => {
-            const getText = (selector: string) =>
-              document.querySelector(selector)?.textContent?.trim() ?? "";
-
-            const getImage = (selector: string) =>
-              document.querySelector(selector)?.getAttribute("src") ?? "";
-
-            return {
-              description:
-                getText('[data-a-target="ExpandableText"]') ||
-                getText(".highlight-card__overlay") ||
-                getText(".highlight-card__content"),
-              publisher: getText('[data-a-target="Publisher"]'),
-              developer: getText('[data-a-target="Developer"]'),
-              release_date: getText('[data-a-target="ReleaseDate"]'),
-              ageText: getText(".availability-date"),
-              // Try multiple selectors for cover image
-              cover:
-                getImage("picture.tw-picture img.tw-full-width") ||
-                getImage('img[src*="images"]') ||
-                getImage(".game-image img") ||
-                getImage(".game-cover img"),
-            };
-          });
-
-          // Process age text to get end date
-          const daysRemaining = parseInt(
-            /\(in (\d+) days\)/.exec(details.ageText)?.[1] ?? "30",
-          );
-          const endDate = new Date();
-          endDate.setDate(endDate.getDate() + daysRemaining);
-
-          const releaseDate = new Date(details.release_date);
-          const cover = card.cover || details.cover;
-
-          return {
-            name: card.title,
-            cover,
-            cover_portrait: cover,
-            description: details.description,
-            developer: details.developer,
-            publisher: details.publisher,
-            platform_ids: ["windows"],
-            release_date: Number.isNaN(releaseDate.getTime())
-              ? null
-              : releaseDate,
-            end_date: endDate,
-            provider_url,
-          };
-        } catch (error) {
-          log.warn("Error getting game details", { game: card.title, error });
-          return null;
-        } finally {
-          await descPage.close();
-        }
-      },
-    );
-
-    const validGames = results.filter(
-      (game): game is AmazonPrimeGameDetails => game != null,
-    );
-
-    log.info("Scraped Amazon Prime games", {
-      games: validGames.length,
-      durationMs: Date.now() - startTime,
+    games.push({
+      name,
+      cover: firstFilled(hero, card),
+      cover_portrait: firstFilled(card, hero),
+      description: firstFilled(
+        gameAssets?.longformDescription,
+        item.assets?.shortformDescription,
+      ),
+      developer: firstFilled(gameAssets?.primaryDeveloper, publisher),
+      publisher,
+      release_date: parseDate(gameAssets?.releaseDate),
+      start_date: parseDate(offer?.startTime) ?? now,
+      end_date: endDate,
+      provider_url: providerUrl,
     });
-    return validGames;
-  } catch (error) {
-    log.error("Error scraping Amazon Prime games", { error });
-    return [];
-  } finally {
-    await browser.close();
   }
+
+  return games;
+}
+
+/**
+ * Fetch this month's Prime Gaming free games from Amazon Luna.
+ */
+export async function fetchPrimeGamingGames(): Promise<PrimeGamingGame[]> {
+  const page = await fetchOk(LUNA_CLAIMS_URL, {
+    headers: { "accept-language": "en-GB,en;q=0.9" },
+  });
+  const html = await page.text();
+  const csrfToken = /name=['"]csrf-key['"]\s+value=['"]([^'"]+)['"]/.exec(
+    html,
+  )?.[1];
+  if (!csrfToken) {
+    throw new Error("Amazon Luna claims page has no CSRF token");
+  }
+  const cookie = page.headers
+    .getSetCookie()
+    .map((header) => header.split(";")[0])
+    .join("; ");
+
+  const response = await fetchJson<LunaResponse>(LUNA_GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "csrf-token": csrfToken,
+      cookie,
+      origin: "https://luna.amazon.com",
+      referer: LUNA_CLAIMS_URL,
+    },
+    body: JSON.stringify({
+      operationName: "FreeGames",
+      query: FREE_GAMES_QUERY,
+      variables: { collectionType: "FREE_GAMES", pageSize: PAGE_SIZE },
+    }),
+  });
+
+  if (response.errors?.length) {
+    const messages = response.errors.map((error) => error.message).join("; ");
+    throw new Error(`Amazon Luna API error: ${messages}`);
+  }
+
+  const games = parseLunaItems(response.data?.items?.items ?? []);
+  log.info("Fetched Prime Gaming games", { games: games.length });
+  return games;
 }
 
 /**
@@ -172,8 +195,7 @@ export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
   errors: string[];
 }> {
   try {
-    // Scrape games from Amazon Prime
-    const primeGames = await scrapeAmazonPrimeGames();
+    const primeGames = await fetchPrimeGamingGames();
 
     // Track results
     const results = {
@@ -184,26 +206,14 @@ export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
       errors: [] as string[],
     };
 
-    // Set start date to 1st of current month
-    const startDate = new Date();
-    startDate.setDate(1);
-
     // Process each game
     for (const game of primeGames) {
       try {
         const outcome = await upsertSubscriptionGame(dbInstance, {
-          name: game.name,
-          cover: game.cover,
-          cover_portrait: game.cover_portrait,
-          description: game.description,
-          developer: game.developer,
-          publisher: game.publisher,
-          platform_ids: game.platform_ids,
-          start_date: startDate,
-          end_date: game.end_date,
+          ...game,
+          // Prime Gaming games are PC games claimed on Epic, GOG, Amazon or Legacy Games
+          platform_ids: ["windows"],
           provider_id: "amazon_games",
-          provider_url: game.provider_url,
-          release_date: game.release_date,
         });
 
         results[outcome]++;
