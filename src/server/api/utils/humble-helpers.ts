@@ -1,4 +1,8 @@
-import { getBrowser } from "./puppeteer-helper";
+import { normalizePlatformIds } from "./platforms";
+import { getBrowser, newPage } from "./puppeteer-helper";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "humble" });
 
 interface HumbleGameDetails {
   name: string;
@@ -9,23 +13,22 @@ interface HumbleGameDetails {
   publisher: string;
   platform_ids: string[];
   free: boolean;
-  release_date: string;
   provider_url?: string; // Added to support return value
 }
 
 // Humble Bundle API response interfaces
 interface HumbleApiResponse {
-  result: HumbleGameResult[];
+  result?: HumbleGameResult[];
 }
 
 interface HumbleGameResult {
-  human_name: string;
-  large_capsule: string;
-  description: string;
-  developers: Array<{ "developer-name": string }>;
-  publishers: Array<{ "publisher-name": string }>;
-  platforms: string[];
-  current_price: { amount: number };
+  human_name?: string;
+  large_capsule?: string;
+  description?: string;
+  developers?: Array<{ "developer-name": string }>;
+  publishers?: Array<{ "publisher-name": string }>;
+  platforms?: string[];
+  current_price?: { amount: number };
 }
 
 /**
@@ -77,37 +80,17 @@ export async function fetchHumbleGameDetails(
   const browser = await getBrowser();
 
   try {
-    if (!browser) {
-      throw new Error("Browser not found");
-    }
+    const page = await newPage(browser);
 
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36",
-    );
-    page.setDefaultNavigationTimeout(0);
-
-    // Navigate to the API endpoint with the game IDs
+    // Navigate to the API endpoint with the game IDs and read the raw JSON body
     const apiUrl = `https://www.humblebundle.com/store/api/lookup?products%5B%5D=${gameIds}&request=1&edit_mode=false`;
-    await page.goto(apiUrl);
-    await page.setViewport({
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 1,
-    });
-    await page.waitForSelector("*");
+    const response = await page.goto(apiUrl);
 
-    // Extract the JSON data from the page
-    const jsonText = await page.evaluate(() => {
-      const element = document.querySelector("*");
-      return element ? (element.textContent ?? null) : null;
-    });
-
-    if (!jsonText) {
+    if (!response?.ok()) {
       throw new Error("Failed to fetch Humble Bundle game data");
     }
 
-    const apiResponse = JSON.parse(jsonText) as HumbleApiResponse;
+    const apiResponse = (await response.json()) as HumbleApiResponse | null;
 
     if (!apiResponse?.result?.[0]) {
       throw new Error("Invalid Humble Bundle API response");
@@ -122,9 +105,6 @@ export async function fetchHumbleGameDetails(
       return null;
     }
 
-    // Extract platforms
-    const platforms = game.platforms ?? [];
-
     // Format the description by removing HTML tags
     const description = game.description?.replace(/<[^>]+>/g, "") ?? "";
 
@@ -135,12 +115,11 @@ export async function fetchHumbleGameDetails(
       description,
       developer: game.developers?.[0]?.["developer-name"] ?? "",
       publisher: game.publishers?.[0]?.["publisher-name"] ?? "",
-      platform_ids: platforms,
+      platform_ids: normalizePlatformIds(game.platforms ?? []),
       free: true,
-      release_date: "", // Humble Bundle doesn't provide release dates consistently
     };
   } catch (error) {
-    console.error("Error fetching Humble Bundle game details:", error);
+    log.error("Error fetching Humble Bundle game details", { error });
     return null;
   } finally {
     await browser.close();
@@ -181,7 +160,7 @@ export async function processHumbleGame(humbleUrl: string): Promise<{
       endDate,
     };
   } catch (error) {
-    console.error("Error processing Humble Bundle game:", error);
+    log.error("Error processing Humble Bundle game", { error });
     return null;
   }
 }

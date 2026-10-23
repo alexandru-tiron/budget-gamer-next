@@ -24,7 +24,7 @@ export const freeGamesRouter = createTRPCRouter({
         free: z.boolean(),
         platform_ids: z.array(z.string()),
         provider_id: z.string(),
-        provider_url: z.string(),
+        provider_url: z.string().url(),
         publisher: z.string(),
         release_date: z.date(),
       }),
@@ -37,14 +37,14 @@ export const freeGamesRouter = createTRPCRouter({
     return getAvailableFreeGames(ctx.db);
   }),
 
+  // Public procedure - only adds games that are verified to be free on their store
   validateGameLink: publicProcedure
     .input(
       z.object({
-        link: z.string().min(1),
+        link: z.string().url().max(2048),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const { link } = input;
-      return processGameLink(link, ctx.db);
+      return processGameLink(input.link, ctx.db);
     }),
 });

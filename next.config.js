@@ -4,25 +4,53 @@
  */
 import "./src/env.js";
 
+// Image CDNs used by the stores we scrape. Article previews can come from any site, so those
+// images skip the optimizer instead of opening it up to every host.
+const imageHosts = [
+  "**.steamstatic.com",
+  "**.akamaihd.net",
+  "**.epicgames.com",
+  "**.unrealengine.com",
+  "**.gog-statics.com",
+  "**.gog.com",
+  "**.imgix.net",
+  "**.humblebundle.com",
+  "**.playstation.com",
+  "**.playstation.net",
+  "**.media-amazon.com",
+  "**.ssl-images-amazon.com",
+  "**.s-microsoft.com",
+  "**.nintendo.com",
+];
+
 /** @type {import("next").NextConfig} */
 const config = {
-  typescript: {
-    ignoreBuildErrors: true,
-  },
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-
+  // Docker and self-hosted builds bundle a minimal Node server; Vercel doesn't need it
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   images: {
-    dangerouslyAllowSVG: true,
-    unoptimized: false, // Enables Next.js image optimization
-    remotePatterns: [
+    remotePatterns: imageHosts.map((hostname) => ({
+      protocol: "https",
+      hostname,
+    })),
+  },
+  async headers() {
+    return [
       {
-        protocol: "https",
-        hostname: "**", // Allows optimization for all external images
+        // Browsers must always fetch the latest service worker
+        source: "/sw.js",
+        headers: [
+          {
+            key: "Content-Type",
+            value: "application/javascript; charset=utf-8",
+          },
+          { key: "Cache-Control", value: "no-cache, no-store, must-revalidate" },
+          {
+            key: "Content-Security-Policy",
+            value: "default-src 'self'; script-src 'self'",
+          },
+        ],
       },
-    ],
-    disableStaticImages: false,
+    ];
   },
 };
 

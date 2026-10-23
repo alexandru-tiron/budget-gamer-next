@@ -1,37 +1,22 @@
-import { Suspense } from "react";
-
-import { api, HydrateClient } from "~/trpc/server";
+import { getAvailableFreeGames } from "~/server/api/services/freeGames-service";
+import { db } from "~/server/db";
+import { renderPerRequestIfBuiltWithoutDatabase } from "~/server/render-mode";
 import FreeGames from "./_components/FreeGames/FreeGames";
-import Loader from "./_components/common/Loader";
-import { getFreeGames } from "~/server/queries";
 import AddLinkButton from "./_components/common/AddLinkButton";
 
+// Regenerate at least hourly; cron jobs and link submissions also revalidate on demand
+export const revalidate = 3600;
+
 export default async function Home() {
-  const games = await getFreeGames();
-  console.log(games);
-  const handleSubmit = async (link: string, type: "game" | "article") => {
-    "use server";
-    if (link) {
-      if (type === "game") {
-        await api.freeGames.validateGameLink({
-          link,
-        });
-      } else {
-        await api.articles.validateAndCreateArticle({
-          link,
-        });
-      }
-    }
-  };
+  await renderPerRequestIfBuiltWithoutDatabase();
+  const games = await getAvailableFreeGames(db);
+
   return (
-    <HydrateClient>
-      
-        <div className="h-full w-full px-4 py-6 md:px-6 lg:px-8">
-          <Suspense fallback={<Loader />}>
-            <FreeGames games={games} />
-          </Suspense>
-        </div>
-        <AddLinkButton type="game" handleSubmit={handleSubmit} />
-    </HydrateClient>
+    <>
+      <div className="h-full w-full px-4 py-6 md:px-6 lg:px-10">
+        <FreeGames games={games} />
+      </div>
+      <AddLinkButton type="game" />
+    </>
   );
 }

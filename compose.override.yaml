@@ -1,0 +1,40 @@
+# Development overrides, loaded automatically by `docker compose up`.
+# Skip them for production with `docker compose -f compose.yaml ...`.
+#
+#   docker compose up --build --watch   # app on http://localhost:3000, edits sync in live
+#   docker compose up -d db             # only Postgres, for `npm run dev` on the host
+
+services:
+  db:
+    ports:
+      # For `npm run dev`, Drizzle Studio and other host tools; loopback only
+      - "127.0.0.1:5432:5432"
+
+  app:
+    build:
+      target: dev
+    environment:
+      LOG_LEVEL: debug
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /app/src
+        - action: sync
+          path: ./public
+          target: /app/public
+        - action: rebuild
+          path: package.json
+        - action: rebuild
+          path: package-lock.json
+        - action: rebuild
+          path: next.config.js
+
+  # Scrapers hit real store sites; start them in development only on purpose:
+  #   docker compose --profile scheduler up
+  scheduler:
+    profiles: ["scheduler"]

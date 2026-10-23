@@ -1,0 +1,2 @@
+DROP INDEX "subscription_games_provider_url_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "subscription_games_provider_url_idx" ON "budget-gamer-next_subscription_games" USING btree ("provider_id","provider_url");

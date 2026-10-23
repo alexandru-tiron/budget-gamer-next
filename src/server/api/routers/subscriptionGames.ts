@@ -1,13 +1,18 @@
 import { z } from "zod";
 
-import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import {
+  createTRPCRouter,
+  internalProcedure,
+  publicProcedure,
+} from "~/server/api/trpc";
 import {
   createSubscriptionGame,
   getAvailableSubscriptionGames,
 } from "../services/subscriptionGames-service";
 
 export const subscriptionGamesRouter = createTRPCRouter({
-  createSubscriptionGame: publicProcedure
+  // Internal procedure - only server-side code may insert games directly
+  createSubscriptionGame: internalProcedure
     .input(
       z.object({
         name: z.string().min(1),
@@ -19,7 +24,7 @@ export const subscriptionGamesRouter = createTRPCRouter({
         end_date: z.date(),
         platform_ids: z.array(z.string()),
         provider_id: z.string(),
-        provider_url: z.string(),
+        provider_url: z.string().url(),
         publisher: z.string(),
         release_date: z.date(),
       }),

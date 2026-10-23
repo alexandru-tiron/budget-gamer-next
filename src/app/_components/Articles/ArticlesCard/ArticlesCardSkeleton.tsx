@@ -1,11 +1,14 @@
 export default function ArticlesCardSkeleton() {
   return (
-    <div className="card relative mb-4 flex flex-col overflow-hidden rounded-xl bg-[#1e1e1e] shadow-sm transition-shadow hover:shadow-md">
-      <div className="relative aspect-[16/9] w-full overflow-hidden bg-gray-100" />
-      <div className="p-3">
-        <div className="mb-2 h-4 w-24 rounded-full bg-gray-100" />
-        <div className="mb-2 h-4 w-32 rounded-full bg-gray-100" />
-        <div className="h-4 w-28 rounded-full bg-gray-100" />
+    <div
+      aria-hidden="true"
+      className="bg-surface flex animate-pulse flex-col overflow-hidden rounded-2xl ring-1 ring-white/5"
+    >
+      <div className="bg-surface-2 aspect-[16/8] w-full" />
+      <div className="flex flex-col gap-2 p-4">
+        <div className="bg-surface-2 h-4 w-3/4 rounded-full" />
+        <div className="bg-surface-2 h-3 w-full rounded-full" />
+        <div className="bg-surface-2 h-3 w-5/6 rounded-full" />
       </div>
     </div>
   );

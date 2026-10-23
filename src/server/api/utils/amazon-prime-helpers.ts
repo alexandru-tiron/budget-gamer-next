@@ -1,7 +1,11 @@
 import type { db } from "~/server/db";
-import { subscriptionGames } from "~/server/db/schema";
-import { eq, and } from "drizzle-orm";
-import { getBrowser } from "./puppeteer-helper";
+import { upsertSubscriptionGame } from "../services/subscriptionGames-service";
+import { getBrowser, mapWithConcurrency, newPage } from "./puppeteer-helper";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "amazon-prime" });
+
+const PRIME_GAMING_URL = "https://gaming.amazon.com/home?filter=Game";
 
 interface AmazonPrimeGameDetails {
   name: string;
@@ -11,8 +15,9 @@ interface AmazonPrimeGameDetails {
   developer: string;
   publisher: string;
   platform_ids: string[];
-  release_date: Date;
+  release_date: Date | null;
   end_date: Date;
+  provider_url: string;
 }
 
 /**
@@ -21,33 +26,16 @@ interface AmazonPrimeGameDetails {
 export async function scrapeAmazonPrimeGames(): Promise<
   AmazonPrimeGameDetails[]
 > {
-  console.log("Starting Amazon Prime games scraping...");
+  log.info("Starting Amazon Prime games scraping...");
   const startTime = Date.now();
 
   const browser = await getBrowser();
 
   try {
-    if (!browser) {
-      throw new Error("Failed to launch browser");
-    }
+    const page = await newPage(browser);
 
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    );
-
-    await page.setViewport({
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 1,
-    });
-
-    // Set shorter timeouts
-    page.setDefaultNavigationTimeout(15000);
-    page.setDefaultTimeout(5000);
-
-    console.log("Navigating to Amazon Prime Gaming page...");
-    await page.goto("https://gaming.amazon.com/home?filter=Game", {
+    log.info("Navigating to Amazon Prime Gaming page...");
+    await page.goto(PRIME_GAMING_URL, {
       waitUntil: "domcontentloaded",
     });
 
@@ -57,139 +45,119 @@ export async function scrapeAmazonPrimeGames(): Promise<
         timeout: 5000,
       });
     } catch (error) {
-      console.log(
-        "Game cards not found, trying alternative selector...",
+      log.debug("Game cards not found, trying alternative selector", {
         error,
-      );
+      });
       try {
         await page.waitForSelector(".tw-block .item-card__action", {
           timeout: 3000,
         });
       } catch (error) {
-        console.log(
+        log.debug(
           "Alternative selector not found, proceeding with available elements",
-          error,
+          { error },
         );
       }
     }
 
-    const gameHandles = await page.$$(".item-card__action");
-    console.log(`Found ${gameHandles.length} game cards`);
+    // Extract basic info from every card first
+    const cards = await page.$$eval(".item-card__action", (elements) =>
+      elements.map((el) => ({
+        title: el.querySelector("h3")?.textContent?.trim() ?? "",
+        cover:
+          el.querySelector('img[src*="images"]')?.getAttribute("src") ?? "",
+        href: el.querySelector("a")?.getAttribute("href") ?? "",
+      })),
+    );
+    log.info(`Found ${cards.length} game cards`);
 
-    const gamePromises = gameHandles.map(async (gameHandle) => {
-      try {
-        // Extract basic info first
-        const title =
-          (await gameHandle.evaluate((el) =>
-            el.querySelector("h3")?.textContent?.trim(),
-          )) ?? "";
-        let cover =
-          (await gameHandle.evaluate((el) =>
-            el.querySelector('img[src*="images"]')?.getAttribute("src"),
-          )) ?? "";
-        const url =
-          (await gameHandle.evaluate((el) =>
-            el.querySelector("a")?.getAttribute("href"),
-          )) ?? "";
+    const validCards = cards.filter((card) => card.title && card.href);
 
-        if (!title) {
-          console.log("Skipping game - no title found");
-          return null;
-        }
-        if (url) {
-          const provider_url = "https://gaming.amazon.com" + url;
-          try {
-            const descPage = await browser.newPage();
-            descPage.setDefaultTimeout(5000);
-            await descPage.goto(provider_url, {
-              waitUntil: "domcontentloaded",
-            });
+    // Open detail pages a few at a time to keep memory use low
+    const results = await mapWithConcurrency(
+      validCards,
+      3,
+      async (card): Promise<AmazonPrimeGameDetails | null> => {
+        const provider_url = new URL(card.href, PRIME_GAMING_URL).toString();
+        const descPage = await newPage(browser);
 
-            // Try to get description and other details in parallel
-            const details = await descPage.evaluate(() => {
-              const getText = (selector: string) =>
-                document.querySelector(selector)?.textContent?.trim() ?? "";
+        try {
+          await descPage.goto(provider_url, {
+            waitUntil: "domcontentloaded",
+          });
 
-              const getImage = (selector: string) =>
-                document.querySelector(selector)?.getAttribute("src") ?? "";
+          const details = await descPage.evaluate(() => {
+            const getText = (selector: string) =>
+              document.querySelector(selector)?.textContent?.trim() ?? "";
 
-              return {
-                description:
-                  getText('[data-a-target="ExpandableText"]') ||
-                  getText(".highlight-card__overlay") ||
-                  getText(".highlight-card__content"),
-                publisher: getText('[data-a-target="Publisher"]'),
-                developer: getText('[data-a-target="Developer"]'),
-                release_date: getText('[data-a-target="ReleaseDate"]'),
-                ageText: getText(".availability-date"),
-                // Try multiple selectors for cover image
-                cover:
-                  getImage("picture.tw-picture img.tw-full-width") ||
-                  getImage('img[src*="images"]') ||
-                  getImage(".game-image img") ||
-                  getImage(".game-cover img"),
-              };
-            });
-            console.log(details);
-
-            const description = details.description;
-            const publisher = details.publisher;
-            const developer = details.developer;
-            const release_date = details.release_date;
-            const ageText = details.ageText;
-            // If we didn't have a cover from the main page, use the one from the detail page
-            if (!cover && details.cover) {
-              cover = details.cover;
-            }
-
-            await descPage.close();
-            // Process age text to get end date
-            const daysRemaining = parseInt(
-              /\(in (\d+) days\)/.exec(ageText)?.[1] ?? "30",
-            );
-            const endDate = new Date();
-            endDate.setDate(endDate.getDate() + daysRemaining);
-            console.log(endDate);
-            // Set start date to 1st of current month
-            const startDate = new Date();
-            startDate.setDate(1);
+            const getImage = (selector: string) =>
+              document.querySelector(selector)?.getAttribute("src") ?? "";
 
             return {
-              name: title,
-              cover: cover || "", // Ensure we always have a string, even if empty
-              cover_portrait: cover || "", // Same for portrait
-              description,
-              developer,
-              publisher,
-              platform_ids: ["windows"],
-              release_date: new Date(release_date),
-              end_date: endDate,
+              description:
+                getText('[data-a-target="ExpandableText"]') ||
+                getText(".highlight-card__overlay") ||
+                getText(".highlight-card__content"),
+              publisher: getText('[data-a-target="Publisher"]'),
+              developer: getText('[data-a-target="Developer"]'),
+              release_date: getText('[data-a-target="ReleaseDate"]'),
+              ageText: getText(".availability-date"),
+              // Try multiple selectors for cover image
+              cover:
+                getImage("picture.tw-picture img.tw-full-width") ||
+                getImage('img[src*="images"]') ||
+                getImage(".game-image img") ||
+                getImage(".game-cover img"),
             };
-          } catch (error) {
-            console.log(`Error getting details for ${title}:`, error);
-          }
+          });
+
+          // Process age text to get end date
+          const daysRemaining = parseInt(
+            /\(in (\d+) days\)/.exec(details.ageText)?.[1] ?? "30",
+          );
+          const endDate = new Date();
+          endDate.setDate(endDate.getDate() + daysRemaining);
+
+          const releaseDate = new Date(details.release_date);
+          const cover = card.cover || details.cover;
+
+          return {
+            name: card.title,
+            cover,
+            cover_portrait: cover,
+            description: details.description,
+            developer: details.developer,
+            publisher: details.publisher,
+            platform_ids: ["windows"],
+            release_date: Number.isNaN(releaseDate.getTime())
+              ? null
+              : releaseDate,
+            end_date: endDate,
+            provider_url,
+          };
+        } catch (error) {
+          log.warn("Error getting game details", { game: card.title, error });
+          return null;
+        } finally {
+          await descPage.close();
         }
-      } catch (error) {
-        console.log("Error processing game:", error);
-        return null;
-      }
-    });
+      },
+    );
 
-    // Process games in parallel
-    const results = await Promise.all(gamePromises);
     const validGames = results.filter(
-      (game): game is AmazonPrimeGameDetails => game !== null,
+      (game): game is AmazonPrimeGameDetails => game != null,
     );
 
-    console.log(
-      `Successfully processed ${validGames.length} games in ${(Date.now() - startTime) / 1000} seconds`,
-    );
+    log.info("Scraped Amazon Prime games", {
+      games: validGames.length,
+      durationMs: Date.now() - startTime,
+    });
     return validGames;
   } catch (error) {
-    console.error("Error scraping Amazon Prime games:", error);
+    log.error("Error scraping Amazon Prime games", { error });
     return [];
   } finally {
-    await browser?.close();
+    await browser.close();
   }
 }
 
@@ -199,6 +167,7 @@ export async function scrapeAmazonPrimeGames(): Promise<
 export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
   total: number;
   added: number;
+  updated: number;
   failed: number;
   errors: string[];
 }> {
@@ -210,32 +179,19 @@ export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
     const results = {
       total: primeGames.length,
       added: 0,
+      updated: 0,
       failed: 0,
       errors: [] as string[],
     };
 
+    // Set start date to 1st of current month
+    const startDate = new Date();
+    startDate.setDate(1);
+
     // Process each game
     for (const game of primeGames) {
       try {
-        // Check if game already exists
-        const existingGame = await dbInstance.query.subscriptionGames.findFirst(
-          {
-            where: and(
-              eq(subscriptionGames.name, game.name),
-              eq(subscriptionGames.provider_id, "amazon_games"),
-            ),
-          },
-        );
-
-        if (existingGame) {
-          console.log(`Game already exists: ${game.name}`);
-          continue;
-        }
-        const startDate = new Date();
-        startDate.setDate(1);
-        // console.log(game);
-        // Add game to database
-        await dbInstance.insert(subscriptionGames).values({
+        const outcome = await upsertSubscriptionGame(dbInstance, {
           name: game.name,
           cover: game.cover,
           cover_portrait: game.cover_portrait,
@@ -246,14 +202,13 @@ export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
           start_date: startDate,
           end_date: game.end_date,
           provider_id: "amazon_games",
-          provider_url: "https://gaming.amazon.com/home?filter=Game",
+          provider_url: game.provider_url,
           release_date: game.release_date,
         });
 
-        results.added++;
+        results[outcome]++;
       } catch (error) {
         results.failed++;
-        console.log(game);
         const errorMessage =
           error instanceof Error ? error.message : "Unknown error";
         results.errors.push(`${game.name}: ${errorMessage}`);
@@ -262,7 +217,7 @@ export async function processAmazonPrimeGames(dbInstance: typeof db): Promise<{
 
     return results;
   } catch (error) {
-    console.error("Error processing Amazon Prime games:", error);
+    log.error("Error processing Amazon Prime games", { error });
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     throw new Error(`Failed to process Amazon Prime games: ${errorMessage}`);

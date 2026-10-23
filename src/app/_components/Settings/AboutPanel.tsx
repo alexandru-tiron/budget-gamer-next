@@ -5,7 +5,7 @@ export default function AboutPanel() {
     <>
       <SidePanelHeader title="About app" />
       <div className="h-full bg-[#141314] p-4 text-white">
-        <h2 className="mb-6 text-xl font-medium text-[#684ace]">
+        <h2 className="mb-6 text-xl font-medium text-[#8f73e8]">
           Welcome to Budget Gamer!
         </h2>
         <div className="space-y-4 pb-12 text-sm font-light">
@@ -47,7 +47,7 @@ export default function AboutPanel() {
             to feedback and try to implement features that will be requested so
             we can bring as much value as possible to our users.
           </p>
-          <h3 className="mt-6 text-lg font-medium text-[#684ace]">
+          <h3 className="mt-6 text-lg font-medium text-[#8f73e8]">
             Future updates:
           </h3>
           <ul className="list-disc space-y-2 pl-6">

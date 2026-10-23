@@ -1,14 +1,23 @@
-import { getLinkPreview } from "link-preview-js";
+import { lookup } from "node:dns/promises";
 import { env } from "~/env";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "articles" });
 
 // URL validation patterns
 export const URL_PATTERN =
   /^https?:\/\/(www\.)?[-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)$/i;
-export const TWITTER_PATTERN = /twitter\.com\/.*/i;
-export const HUMBLE_PATTERN = /humblebundle\.com\/.*/i;
-export const GLEAM_PATTERN = /gleam\.io\/.*/i;
-export const REDDIT_PATTERN = /reddit\.com\/.*/i;
-export const FACEBOOK_PATTERN = /facebook\.com\/.*/i;
+
+// Sites articles can link to, with the cover shown when the page has no preview image
+const ARTICLE_SOURCES = {
+  twitter: { domains: ["twitter.com", "x.com"], cover: "twitter.jpg" },
+  humble: { domains: ["humblebundle.com"], cover: "humbleBundle.jpg" },
+  gleam: { domains: ["gleam.io"], cover: "gleam.jpg" },
+  reddit: { domains: ["reddit.com"], cover: "reddit.jpg" },
+  facebook: { domains: ["facebook.com"], cover: "facebook.jpg" },
+} as const;
+
+type ArticleSource = keyof typeof ARTICLE_SOURCES;
 
 // Interface for standardized link data
 export interface ArticleLinkData {
@@ -29,29 +38,44 @@ interface RedditPost {
 }
 
 interface RedditApiResponse {
-  data: {
-    children: RedditPost[];
+  data?: {
+    children?: RedditPost[];
   };
 }
 
 /**
- * Check if a URL matches a given pattern
+ * Find which supported site a URL belongs to, by its hostname (so "evil.com/?reddit.com/" is
+ * rejected), or null if it isn't an http(s) link to a supported site.
  */
-export function doesUrlMatch(url: string, pattern: RegExp): boolean {
-  return pattern.test(url);
+export function getArticleSource(url: string): ArticleSource | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return null;
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  for (const [source, { domains }] of Object.entries(ARTICLE_SOURCES)) {
+    if (
+      domains.some(
+        (domain) => hostname === domain || hostname.endsWith(`.${domain}`),
+      )
+    ) {
+      return source as ArticleSource;
+    }
+  }
+  return null;
 }
 
 /**
  * Check if URL is from an allowed domain
  */
 export function isAllowedDomain(url: string): boolean {
-  return (
-    doesUrlMatch(url, TWITTER_PATTERN) ||
-    doesUrlMatch(url, HUMBLE_PATTERN) ||
-    doesUrlMatch(url, GLEAM_PATTERN) ||
-    doesUrlMatch(url, REDDIT_PATTERN) ||
-    doesUrlMatch(url, FACEBOOK_PATTERN)
-  );
+  return getArticleSource(url) !== null;
 }
 
 /**
@@ -59,9 +83,10 @@ export function isAllowedDomain(url: string): boolean {
  * Some sites require specific user agents to return proper metadata
  */
 export function getUserAgent(url: string): Record<string, string> {
-  if (doesUrlMatch(url, TWITTER_PATTERN)) {
+  const source = getArticleSource(url);
+  if (source === "twitter") {
     return { "user-agent": "googlebot" };
-  } else if (doesUrlMatch(url, REDDIT_PATTERN)) {
+  } else if (source === "reddit") {
     return { "user-agent": "WhatsApp/2.22.18.75 A" };
   } else {
     return {
@@ -75,19 +100,9 @@ export function getUserAgent(url: string): Record<string, string> {
  * Get a default cover image based on domain
  */
 export function getDefaultCoverImage(url: string): string {
-  if (doesUrlMatch(url, TWITTER_PATTERN)) {
-    return "https://firebasestorage.googleapis.com/v0/b/budget-gamer-debug.appspot.com/o/defaultImages%2Ftwitter.jpg?alt=media&token=92f9aade-f7a2-4bc9-b645-d5a8f8a9bb63";
-  } else if (doesUrlMatch(url, HUMBLE_PATTERN)) {
-    return "https://firebasestorage.googleapis.com/v0/b/budget-gamer-debug.appspot.com/o/defaultImages%2FhumbleBundle.jpg?alt=media&token=be57d6e8-c715-45cd-a1f4-5855635afef5";
-  } else if (doesUrlMatch(url, GLEAM_PATTERN)) {
-    return "https://firebasestorage.googleapis.com/v0/b/budget-gamer-debug.appspot.com/o/defaultImages%2Fgleam.jpg?alt=media&token=7916b299-78bf-479d-b1d3-568e459a28ef";
-  } else if (doesUrlMatch(url, REDDIT_PATTERN)) {
-    return "https://firebasestorage.googleapis.com/v0/b/budget-gamer-debug.appspot.com/o/defaultImages%2Freddit.jpg?alt=media&token=df915d1e-e68c-4d45-95a3-d1c1c8755fb6";
-  } else if (doesUrlMatch(url, FACEBOOK_PATTERN)) {
-    return "https://firebasestorage.googleapis.com/v0/b/budget-gamer-debug.appspot.com/o/defaultImages%2Ffacebook.jpg?alt=media&token=abcf3d70-22cc-457f-bc25-5f82e67c5ad3";
-  } else {
-    return "https://firebasestorage.googleapis.com/v0/b/budget-gamer-debug.appspot.com/o/defaultImages%2Fdefault.jpg?alt=media&token=37aef14b-5e4a-49ea-bd5c-e074feb9013b";
-  }
+  const source = getArticleSource(url);
+  const cover = source ? ARTICLE_SOURCES[source].cover : "default.jpg";
+  return `/images/articles/${cover}`;
 }
 
 /**
@@ -131,7 +146,7 @@ export function processLinkData(
  */
 export function extractDomain(url: string): string {
   const urlObj = new URL(url);
-  return urlObj.hostname.replace("www.", "");
+  return urlObj.hostname.replace(/^www\./, "");
 }
 
 /**
@@ -141,14 +156,20 @@ export async function fetchLinkPreview(url: string): Promise<ArticleLinkData> {
   const userAgent = getUserAgent(url);
 
   try {
+    // Loaded on demand so pages that only read articles don't pull in its HTTP client
+    const { getLinkPreview } = await import("link-preview-js");
     const rawLinkData = await getLinkPreview(url, {
       imagesPropertyType: "og", // Use Open Graph images when available
       headers: userAgent,
+      timeout: 10_000,
+      // Resolving the host lets link-preview-js refuse loopback and private addresses
+      resolveDNSHost: async (link) =>
+        (await lookup(new URL(link).hostname)).address,
     });
 
     return processLinkData(rawLinkData as Record<string, unknown>);
   } catch (error) {
-    console.error("Error fetching link preview:", error);
+    log.error("Error fetching link preview", { error });
     // Return basic data if preview fails
     return {
       url,

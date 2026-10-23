@@ -2,7 +2,7 @@
 // https://orm.drizzle.team/docs/sql-schema-declaration
 
 import { sql } from "drizzle-orm";
-import { index, pgTableCreator } from "drizzle-orm/pg-core";
+import { index, pgTableCreator, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * This is an example of how to use the multi-project schema feature of Drizzle ORM. Use the same
@@ -41,6 +41,7 @@ export const freeGames = createTable(
     index("free_games_name_idx").on(t.name),
     index("free_games_start_date_idx").on(t.start_date),
     index("free_games_end_date_idx").on(t.end_date),
+    uniqueIndex("free_games_provider_url_idx").on(t.provider_url),
   ],
 );
 
@@ -70,6 +71,11 @@ export const subscriptionGames = createTable(
     index("subscription_games_name_idx").on(t.name),
     index("subscription_games_start_date_idx").on(t.start_date),
     index("subscription_games_end_date_idx").on(t.end_date),
+    // The same game can be in several services at once (e.g. Game Pass and Free Play Days)
+    uniqueIndex("subscription_games_provider_url_idx").on(
+      t.provider_id,
+      t.provider_url,
+    ),
   ],
 );
 
@@ -93,5 +99,6 @@ export const articles = createTable(
   (t) => [
     index("articles_title_idx").on(t.title),
     index("articles_createdAt_idx").on(t.createdAt),
+    uniqueIndex("articles_link_idx").on(t.link),
   ],
 );

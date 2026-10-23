@@ -1,9 +1,12 @@
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
+import { getHTTPStatusCodeFromError } from "@trpc/server/http";
 import { type NextRequest } from "next/server";
 
-import { env } from "~/env";
 import { appRouter } from "~/server/api/root";
 import { createTRPCContext } from "~/server/api/trpc";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "trpc" });
 
 /**
  * This wraps the `createTRPCContext` helper and provides the required context for the tRPC API when
@@ -21,14 +24,16 @@ const handler = (req: NextRequest) =>
     req,
     router: appRouter,
     createContext: () => createContext(req),
-    onError:
-      env.NODE_ENV === "development"
-        ? ({ path, error }) => {
-            console.error(
-              `❌ tRPC failed on ${path ?? "<no-path>"}: ${error.message}`,
-            );
-          }
-        : undefined,
+    onError: ({ path, error }) => {
+      // Rejected input (4xx) is expected traffic; only server faults are errors
+      const status = getHTTPStatusCodeFromError(error);
+      const context = { path: path ?? "<no-path>", status, error };
+      if (status >= 500) {
+        log.error("tRPC request failed", context);
+      } else {
+        log.warn("tRPC request rejected", { ...context, error: error.message });
+      }
+    },
   });
 
 export { handler as GET, handler as POST };

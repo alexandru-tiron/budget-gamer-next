@@ -1,12 +1,18 @@
 export default function GameCardSkeleton() {
-   return (
-      <div className="card relative flex flex-col mb-4 bg-[#1e1e1e] rounded-xl overflow-hidden shadow-sm transition-shadow hover:shadow-md">
-         <div className="relative w-full aspect-[16/9] overflow-hidden bg-gray-100" />
-         <div className="p-3">
-            <div className="h-4 w-24 bg-gray-100 rounded-full mb-2" />
-            <div className="h-4 w-32 bg-gray-100 rounded-full mb-2" />
-            <div className="h-4 w-28 bg-gray-100 rounded-full" />
-         </div>
+  return (
+    <div
+      aria-hidden="true"
+      className="bg-surface flex animate-pulse flex-col overflow-hidden rounded-2xl ring-1 ring-white/5"
+    >
+      <div className="bg-surface-2 aspect-video w-full" />
+      <div className="flex flex-col gap-3 p-4">
+        <div className="bg-surface-2 h-4 w-3/4 rounded-full" />
+        <div className="bg-surface-2 h-4 w-1/2 rounded-full" />
+        <div className="mt-2 flex gap-2">
+          <div className="bg-surface-2 size-3.5 rounded-full" />
+          <div className="bg-surface-2 size-3.5 rounded-full" />
+        </div>
       </div>
-   );
+    </div>
+  );
 }

@@ -22,6 +22,20 @@
       "when": 1744385279607,
       "tag": "0002_last_starhawk",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792093160963,
+      "tag": "0003_unique_store_urls",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792137192650,
+      "tag": "0004_subscription_url_per_provider",
+      "breakpoints": true
     }
   ]
 }

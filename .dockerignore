@@ -1,0 +1,48 @@
+# Version control and CI
+.git/
+.github/
+
+# Editors and tools
+.vscode/
+.idea/
+.claude/
+*.swp
+
+# Dependencies and build output (rebuilt inside the image)
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# Tests (not part of the production build)
+coverage/
+test-results/
+playwright-report/
+blob-report/
+e2e/
+playwright.config.ts
+
+# Documentation
+*.md
+LICENSE
+docs/
+
+# Docker and deployment files
+Dockerfile*
+compose*.yaml
+.dockerignore
+docker/
+deploy/
+
+# Environment and secrets
+**/.npmrc
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.vercel/
+
+# OS files
+.DS_Store
+Thumbs.db

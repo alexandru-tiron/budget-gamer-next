@@ -1,8 +1,13 @@
-
 import type { db } from "~/server/db";
-import { subscriptionGames } from "~/server/db/schema";
-import { eq } from "drizzle-orm";
-import { getBrowser } from "./puppeteer-helper";
+import { logger } from "~/server/logger";
+import {
+  findSubscriptionGameByUrl,
+  replaceSubscriptionGames,
+} from "../services/subscriptionGames-service";
+import { normalizePlatformIds } from "./platforms";
+import { getBrowser, newPage } from "./puppeteer-helper";
+
+const log = logger.child({ scope: "humble-choice" });
 
 interface HumbleChoiceGameDetails {
   name: string;
@@ -19,15 +24,16 @@ interface HumbleChoiceGameDetails {
   release_date: string;
 }
 
+// Scraped from a data attribute, so any field may be missing
 type HumbleChoiceGameResponse = Record<
   string,
   {
-    title: string;
-    image: string;
-    recommendation_copy_dict: {
+    title?: string;
+    image?: string;
+    recommendation_copy_dict?: {
       copy: string;
     };
-    platforms: string[];
+    platforms?: string[];
   }
 >;
 
@@ -37,19 +43,15 @@ type HumbleChoiceGameResponse = Record<
 export async function fetchHumbleChoiceGames(): Promise<
   HumbleChoiceGameDetails[]
 > {
-  console.log("Starting Humble Choice games scraping...");
-  console.log("Environment:", process.env.NODE_ENV);
+  log.info("Starting Humble Choice games scraping...");
 
   const browser = await getBrowser();
 
   try {
-    if (!browser) {
-      throw new Error("Browser not found");
-    }
-    const page = await browser.newPage();
-    page.setDefaultNavigationTimeout(0);
+    const page = await newPage(browser);
     await page.goto(
-      "https://www.humblebundle.com/membership?hmb_source=search_bar", {
+      "https://www.humblebundle.com/membership?hmb_source=search_bar",
+      {
         waitUntil: "domcontentloaded",
       },
     );
@@ -66,38 +68,33 @@ export async function fetchHumbleChoiceGames(): Promise<
 
     for (const id of subsIds) {
       const game = subsResponse[id];
+      if (!game?.title) continue;
 
       // Process platforms
-      const finalPlatformIds: string[] = [];
-      for (const platform of game?.platforms ?? []) {
-        if (platform === "windows") {
-          finalPlatformIds.push("windows");
-        } else if (platform === "mac") {
-          finalPlatformIds.push("mac_os");
-        } else if (platform === "linux") {
-          finalPlatformIds.push("linux");
-        }
-      }
+      const finalPlatformIds = normalizePlatformIds(
+        game.platforms ?? [],
+      ).filter((platform) => ["windows", "mac_os", "linux"].includes(platform));
 
       // Set dates
       const startDate = new Date(Date.now() - 2592000000); // 30 days ago
       const endDate = new Date(startDate.getTime() + 5184000000); // 60 days from start
 
       // Create provider URL
-      const providerUrl = `https://www.humblebundle.com/store/search?sort=bestselling&search=${game?.title
+      const searchTerms = game.title
         .toLowerCase()
         .replace(/[.,\/#!$%\^&\*;:{}=\-_`'~()]/g, "")
         .split(" ")
         .slice(0, 3)
-        .join(" ")}`;
+        .join(" ");
+      const providerUrl = `https://www.humblebundle.com/store/search?sort=bestselling&search=${searchTerms}`;
 
       // Add game to array
       humbleGames.push({
-        name: game?.title ?? "",
-        cover: game?.image ?? "",
-        cover_portrait: game?.image ?? "",
+        name: game.title,
+        cover: game.image ?? "",
+        cover_portrait: game.image ?? "",
         description:
-          game?.recommendation_copy_dict.copy.replace(/<[^>]+>/g, "") ?? "",
+          game.recommendation_copy_dict?.copy.replace(/<[^>]+>/g, "") ?? "",
         developer: "",
         publisher: "",
         platform_ids:
@@ -112,7 +109,7 @@ export async function fetchHumbleChoiceGames(): Promise<
 
     return humbleGames;
   } catch (error) {
-    console.error("Error fetching Humble Choice games:", error);
+    log.error("Error fetching Humble Choice games", { error });
     throw error;
   } finally {
     await browser.close();
@@ -146,54 +143,59 @@ export async function processHumbleChoiceGames(dbInstance: typeof db): Promise<{
     }
 
     // Check if the first game already exists
-    const existingGame = await dbInstance.query.subscriptionGames.findFirst({
-      where: eq(
-        subscriptionGames.provider_url,
-        humbleGames[0]?.provider_url ?? "",
-      ),
-    });
+    const existingGame = await findSubscriptionGameByUrl(
+      dbInstance,
+      "humble_bundle",
+      humbleGames[0]?.provider_url ?? "",
+    );
 
     if (existingGame) {
-      console.log("Humble Choice games already exist in the database");
+      log.info("Humble Choice games already exist in the database");
       return results;
     }
 
-    // Remove all existing Humble Choice games
-    await dbInstance
-      .delete(subscriptionGames)
-      .where(eq(subscriptionGames.provider_id, "humble_bundle"));
+    // One row per store URL, so the unique index can't reject the whole month
+    const rows = new Map(
+      humbleGames.map((game) => {
+        const providerUrl = game.provider_url.replace(/ /g, "%20");
+        return [
+          providerUrl,
+          {
+            cover: game.cover.replace(/ /g, "%20"),
+            cover_portrait: game.cover_portrait.replace(/ /g, "%20"),
+            description: game.description,
+            developer: game.developer,
+            start_date: game.start_date,
+            end_date: game.end_date,
+            name: game.name,
+            platform_ids: game.platform_ids,
+            provider_id: "humble_bundle",
+            provider_url: providerUrl,
+            publisher: game.publisher,
+            release_date: game.release_date
+              ? new Date(game.release_date)
+              : null,
+          },
+        ];
+      }),
+    );
 
-    // Process each game
-    for (const game of humbleGames) {
-      try {
-        // Add new game
-        await dbInstance.insert(subscriptionGames).values({
-          cover: game.cover.replace(/ /g, "%20"),
-          cover_portrait: game.cover_portrait.replace(/ /g, "%20"),
-          description: game.description,
-          developer: game.developer,
-          start_date: game.start_date,
-          end_date: game.end_date,
-          name: game.name,
-          platform_ids: game.platform_ids,
-          provider_id: "humble_bundle",
-          provider_url: game.provider_url.replace(/ /g, "%20"),
-          publisher: game.publisher,
-          release_date: game.release_date ? new Date(game.release_date) : null,
-        });
-
-        results.added++;
-      } catch (error) {
-        results.failed++;
-        const errorMessage =
-          error instanceof Error ? error.message : "Unknown error";
-        results.errors.push(`${game.name}: ${errorMessage}`);
-      }
+    // Replace last month's games in one transaction
+    try {
+      await replaceSubscriptionGames(dbInstance, "humble_bundle", [
+        ...rows.values(),
+      ]);
+      results.added = rows.size;
+    } catch (error) {
+      results.failed = rows.size;
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      results.errors.push(errorMessage);
     }
 
     return results;
   } catch (error) {
-    console.error("Error processing Humble Choice games:", error);
+    log.error("Error processing Humble Choice games", { error });
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     throw new Error(`Failed to process Humble Choice games: ${errorMessage}`);

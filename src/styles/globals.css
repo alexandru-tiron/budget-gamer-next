@@ -1,14 +1,122 @@
 @import "tailwindcss";
 
+/* Drive `dark:` from the class on <html> instead of the OS colour scheme */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Design tokens: `bg-surface`, `text-accent`, `animate-fade-up`... */
+@theme {
+  --color-page: #141314;
+  --color-surface: #1e1e1e;
+  --color-surface-2: #2a2a2a;
+  --color-accent: #8f73e8;
+  --color-accent-strong: #694ace;
+  --color-accent-deep: #7c3196;
+
+  --animate-fade-up: fade-up 0.45s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-fade-in: fade-in 0.2s ease-out both;
+  --animate-slide-in-right: slide-in-right 0.32s cubic-bezier(0.2, 0.7, 0.2, 1)
+    both;
+  --animate-pop-in: pop-in 0.25s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(12px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
+
 @layer base {
   :root {
-    --font-sans: var(--font-roboto), ui-sans-serif, system-ui, sans-serif,
+    --font-sans:
+      var(--font-roboto), ui-sans-serif, system-ui, sans-serif,
       "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
       "Noto Color Emoji";
+    color-scheme: dark;
+  }
+
+  /* A soft purple glow behind the content, echoing the accent gradient */
+  body {
+    background-image:
+      radial-gradient(
+        60rem 28rem at 75% -8rem,
+        rgb(105 74 206 / 0.16),
+        transparent 70%
+      ),
+      radial-gradient(
+        40rem 22rem at 10% 110%,
+        rgb(124 49 150 / 0.1),
+        transparent 70%
+      );
+    background-attachment: fixed;
+  }
+
+  /* Visible keyboard focus on every interactive element */
+  :focus-visible {
+    outline: 2px solid #8f73e8;
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 
 @layer utilities {
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Fade the edges of horizontally scrolling rows */
+  .mask-fade-x {
+    mask-image: linear-gradient(
+      to right,
+      transparent,
+      black 1.5rem,
+      black calc(100% - 3rem),
+      transparent
+    );
+  }
+
   .scrollbar-horizontal-styled::-webkit-scrollbar {
     height: 6px;
     background-color: #15151500;

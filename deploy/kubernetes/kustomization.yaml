@@ -1,0 +1,26 @@
+# Budget Gamer on Kubernetes. See docs/self-hosting.md#kubernetes.
+#
+#   kubectl create namespace budget-gamer
+#   kubectl -n budget-gamer create secret generic budget-gamer --from-env-file=secret.env
+#   kubectl apply -k deploy/kubernetes
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: budget-gamer
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: budget-gamer
+
+resources:
+  - deployment.yaml
+  - service.yaml
+  - migrate-job.yaml
+  - cronjobs.yaml
+
+# Point these at the images you build and push (see docs/self-hosting.md)
+images:
+  - name: ghcr.io/alexandru-tiron/budget-gamer
+    newTag: "0.1.0"
+  - name: ghcr.io/alexandru-tiron/budget-gamer-migrate
+    newTag: "0.1.0"

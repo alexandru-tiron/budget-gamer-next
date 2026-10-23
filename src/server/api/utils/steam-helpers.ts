@@ -1,4 +1,9 @@
-import { getBrowser } from "./puppeteer-helper";
+import { normalizePlatformIds } from "./platforms";
+import { delay, getBrowser, newPage } from "./puppeteer-helper";
+import { monthIndex, PACIFIC_TIME_ZONE, zonedTimeToUtc } from "./time";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "steam" });
 
 interface SteamGameDetails {
   name: string;
@@ -48,26 +53,8 @@ interface SteamGameData {
   };
 }
 
-/**
- * Format a date to DD.MM.YYYY
- */
-export function formatDate(date: string): string {
-  const d = new Date(date);
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const year = d.getFullYear();
-
-  return [day, month, year].join(".");
-}
-
-/**
- * Delay execution for a specified time
- */
-function delay(time: number): Promise<void> {
-  return new Promise(function (resolve) {
-    setTimeout(resolve, time);
-  });
-}
+// Steam shows promotion end times in Pacific time
+const STEAM_TIME_ZONE = PACIFIC_TIME_ZONE;
 
 /**
  * Extract app ID from a Steam URL
@@ -80,26 +67,64 @@ export function extractSteamAppId(url: string): string | null {
 }
 
 /**
+ * Parse the end of a Steam "free to keep" promotion, e.g.
+ * "Free to keep when you get it before Nov 7 @ 10:00am." or "... before 7 Nov @ 10:00am."
+ * The text has no year, so a date that already passed is assumed to be next year's.
+ */
+export function parseSteamEndDate(
+  text: string,
+  now: Date = new Date(),
+): number | null {
+  const monthFirst = /before (\p{L}+)\.? (\d{1,2})\b/iu.exec(text);
+  const dayFirst = /before (\d{1,2}) (\p{L}+)/iu.exec(text);
+  const time = /@ ?(\d{1,2}):(\d{2}) ?([ap])\.?m/i.exec(text);
+
+  const monthName = monthFirst?.[1] ?? dayFirst?.[2];
+  const dayText = monthFirst?.[2] ?? dayFirst?.[1];
+  if (!monthName || !dayText || !time) return null;
+
+  const month = monthIndex(monthName);
+  if (month === -1) return null;
+
+  const day = Number(dayText);
+  const hours =
+    (Number(time[1]) % 12) + (time[3]?.toLowerCase() === "p" ? 12 : 0);
+  const minutes = Number(time[2]);
+
+  const year = now.getUTCFullYear();
+  let endDate = zonedTimeToUtc(
+    year,
+    month,
+    day,
+    hours,
+    minutes,
+    STEAM_TIME_ZONE,
+  );
+
+  // e.g. scraped on Dec 30 for a promotion ending Jan 2
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  if (endDate < now.getTime() - weekMs) {
+    endDate = zonedTimeToUtc(
+      year + 1,
+      month,
+      day,
+      hours,
+      minutes,
+      STEAM_TIME_ZONE,
+    );
+  }
+
+  return endDate;
+}
+
+/**
  * Scrape end date from Steam store page
  */
 export async function scrapeEndDate(steamUrl: string): Promise<number | null> {
   const browser = await getBrowser();
 
   try {
-    if (!browser) {
-      throw new Error("Browser not found");
-    }
-    const page = await browser.newPage();
-    await page.setViewport({
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 1,
-    });
-
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
-    );
-
+    const page = await newPage(browser);
     await page.goto(steamUrl, { waitUntil: "domcontentloaded" });
 
     // Handle age verification if needed
@@ -108,8 +133,7 @@ export async function scrapeEndDate(steamUrl: string): Promise<number | null> {
       await page.select("select#ageYear", "1990");
       await page.click("a#view_product_page_btn");
       await delay(2000);
-    } catch (error) {
-      console.log(error, "Age verification not required or element not found");
+    } catch {
       // Age verification not required or element not found
     }
 
@@ -120,8 +144,7 @@ export async function scrapeEndDate(steamUrl: string): Promise<number | null> {
         timeout: 5000,
       });
     } catch (error) {
-      console.log(error, "Discount info not found");
-      // Discount info not found
+      log.debug("Discount info not found", { error });
       return null;
     }
 
@@ -131,43 +154,7 @@ export async function scrapeEndDate(steamUrl: string): Promise<number | null> {
       return el ? el.textContent : null;
     });
 
-    if (!endDateText) return null;
-
-    // Parse different date formats
-    let endDate: number | null = null;
-
-    // Format: "Free to keep when you get it before Nov 7 @ 10:00am"
-    const dateRegex1 = /before (\w+ \d+).*?@ (\d+:\d+[ap]m)/i;
-    const match1 = dateRegex1.exec(endDateText);
-
-    if (match1) {
-      const dateStr = match1[1];
-      const timeStr = match1[2];
-      const year = new Date().getFullYear();
-      const fullDateStr = `${dateStr}, ${year} ${timeStr}`;
-
-      const date = new Date(fullDateStr);
-      endDate = date.getTime();
-    } else {
-      // Format: "Free to keep when you get it before 7 November @ 10:00am"
-      const dateRegex2 = /before (\d+) (\w+).*?@ (\d+:\d+)([ap]m)/i;
-      const match2 = dateRegex2.exec(endDateText);
-
-      if (match2) {
-        const day = match2[1];
-        const month = match2[2];
-        const time = match2[3];
-        const ampm = match2[4];
-
-        const year = new Date().getFullYear();
-        const fullDateStr = `${day} ${month} ${year} ${time}${ampm}`;
-
-        const date = new Date(fullDateStr);
-        endDate = date.getTime();
-      }
-    }
-
-    return endDate;
+    return endDateText ? parseSteamEndDate(endDateText) : null;
   } finally {
     await browser.close();
   }
@@ -181,9 +168,9 @@ export async function fetchSteamGameDetails(
 ): Promise<SteamGameDetails | null> {
   try {
     const response = await fetch(
-      `http://store.steampowered.com/api/appdetails?appids=${appId}`,
+      `https://store.steampowered.com/api/appdetails?appids=${appId}`,
     );
-    const data = (await response.json()) as SteamApiResponse;
+    const data = (await response.json()) as SteamApiResponse | null;
 
     if (!data?.[appId]?.success) {
       return null;
@@ -215,7 +202,8 @@ export async function fetchSteamGameDetails(
     // Format release date
     let releaseDate = new Date();
     if (gameData.release_date?.date) {
-      releaseDate = new Date(gameData.release_date.date);
+      const parsed = new Date(gameData.release_date.date);
+      if (!Number.isNaN(parsed.getTime())) releaseDate = parsed;
     }
 
     return {
@@ -225,13 +213,13 @@ export async function fetchSteamGameDetails(
       description: gameData.short_description ?? "",
       developer: gameData.developers?.[0] ?? "",
       publisher: gameData.publishers?.[0] ?? "",
-      platform_ids: platformIds,
+      platform_ids: normalizePlatformIds(platformIds),
       free: gameData.is_free ?? false,
       discount_percent: discountPercent,
       release_date: releaseDate,
     };
   } catch (error) {
-    console.error("Error fetching Steam game details:", error);
+    log.error("Error fetching Steam game details", { error });
     return null;
   }
 }

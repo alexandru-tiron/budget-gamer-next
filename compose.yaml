@@ -1,0 +1,96 @@
+# Budget Gamer stack: Postgres, migrations, the app and the scheduled scrapers.
+#
+#   Development:  docker compose up --build --watch
+#                 (compose.override.yaml is loaded automatically: dev server, live sync, db port)
+#   Production:   docker compose -f compose.yaml up -d --build
+#
+# Set POSTGRES_PASSWORD, CRON_SECRET and REDDIT_AUTH_TOKEN in .env (see .env.example).
+# See docs/self-hosting.md for details.
+
+name: budget-gamer
+
+x-database-url: &database-url postgresql://postgres:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/budget-gamer-next
+
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: budget-gamer-next
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d budget-gamer-next"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  # Applies drizzle/ migrations, then exits
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      DATABASE_URL: *database-url
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  app:
+    build:
+      context: .
+      target: production
+    ports:
+      # Put a reverse proxy in front of it; widen the host address only if you need to
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: *database-url
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
+      REDDIT_AUTH_TOKEN: ${REDDIT_AUTH_TOKEN:?Set REDDIT_AUTH_TOKEN in .env}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          # Headless Chromium needs room while a scraper runs
+          memory: 1g
+    restart: unless-stopped
+
+  # Calls the cron endpoints on the same schedule as vercel.json (UTC)
+  scheduler:
+    image: alpine:3.22
+    entrypoint: ["/bin/sh", "/scheduler/entrypoint.sh"]
+    environment:
+      CRON_SECRET: ${CRON_SECRET:?Set CRON_SECRET in .env}
+      APP_URL: http://app:3000
+    volumes:
+      - ./docker/scheduler:/scheduler:ro
+    depends_on:
+      app:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+    restart: unless-stopped
+
+volumes:
+  db-data:

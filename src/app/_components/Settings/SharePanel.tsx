@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useState } from "react";
 import SidePanelHeader from "../SidePanel/SidePanelHeader";
 
-const REPO_URL = "https://github.com/AlexT8/budget-gamer-next";
+const REPO_URL = "https://github.com/alexandru-tiron/budget-gamer-next";
 
 export default function SharePanel() {
   const [showCopied, setShowCopied] = useState(false);

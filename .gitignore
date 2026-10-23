@@ -45,3 +45,12 @@ yarn-error.log*
 # idea files
 .idea
 .vercel
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# kubernetes secrets
+secret.env

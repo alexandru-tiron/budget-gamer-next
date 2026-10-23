@@ -1,5 +1,8 @@
-import { getBrowser } from "./puppeteer-helper";
+import { normalizePlatformIds } from "./platforms";
+import { getBrowser, newPage } from "./puppeteer-helper";
+import { logger } from "~/server/logger";
 
+const log = logger.child({ scope: "playstation" });
 
 interface PlayStationGameDetails {
   name: string;
@@ -10,7 +13,7 @@ interface PlayStationGameDetails {
   publisher: string;
   platform_ids: string[];
   free: boolean;
-  release_date: Date;
+  release_date: Date | null;
 }
 
 // Interfaces for scraping results
@@ -43,21 +46,18 @@ interface GameDetailsData {
 }
 
 interface GamePriceData {
-  offers: {
-    price: number;
+  offers?: {
+    price?: number;
   };
 }
 
 /**
- * Format a date to DD.MM.YYYY
+ * Parse a date string, returning null instead of an Invalid Date
  */
-export function formatDate(date: string | number): string {
-  const d = new Date(date);
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const year = d.getFullYear();
-
-  return [day, month, year].join(".");
+function parseDate(value: string | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 /**
@@ -71,7 +71,7 @@ export function extractPsGameIds(url: string): string[] {
 
   for (const link of gameLinksArray) {
     const trimmedLink = link.trim();
-    const id = trimmedLink.replace(psLinkRegex, "");
+    const id = trimmedLink.replace(psLinkRegex, "").split(/[/?#]/)[0];
     if (id && id !== trimmedLink) {
       gameIds.push(id);
     }
@@ -89,31 +89,27 @@ export async function fetchPsApiGameDetails(
     const response = await fetch(
       `https://store.playstation.com/store/api/chihiro/00_09_000/container/gb/en/999/${gameId}`,
     );
-    // console.log(response.json());
     // If API request is successful
     if (response.ok) {
+      // Legacy API, so treat every field as optional
       const data = (await response.json()) as {
-        name: string;
-        cover: string;
-        cover_portrait: string;
-        description: string;
-        developer: string;
-        provider_name: string;
-        playable_platform: string;
-        default_sku: {
-          price: number;
+        name?: string;
+        provider_name?: string;
+        playable_platform?: string[] | string;
+        default_sku?: {
+          price?: number;
         };
-        release_date: string;
-        images: {
-          url: string;
+        release_date?: string;
+        images?: {
+          url?: string;
         }[];
-        long_desc: string;
+        long_desc?: string;
       };
 
       // Process images
       const imageRef = "https://image.api.playstation.com/";
       const appoloRef = "https://apollo2.dl.playstation.net/";
-      const imagesArray = data.images || [];
+      const imagesArray = data.images ?? [];
 
       let cover = "";
       let coverPortrait = "";
@@ -144,34 +140,29 @@ export async function fetchPsApiGameDetails(
       const description = data.long_desc?.replace(/<[^>]+>/g, "") ?? "";
 
       // Get platforms
-      const platformIds = (data.playable_platform || [])
-        .toString()
-        .replace("™", "")
-        .toLowerCase()
-        .split(",");
+      const platformIds = normalizePlatformIds(
+        (data.playable_platform ?? []).toString().split(","),
+      );
 
       // Check if game is free
       const isFree = data.default_sku?.price === 0;
 
-      // Format release date
-      const releaseDate = new Date(data.release_date);
-
       return {
-        name: data.name || "",
+        name: data.name ?? "",
         cover,
         cover_portrait: coverPortrait,
         description,
-        developer: data.provider_name || "",
-        publisher: data.provider_name || "",
+        developer: data.provider_name ?? "",
+        publisher: data.provider_name ?? "",
         platform_ids: platformIds,
         free: isFree,
-        release_date: releaseDate,
+        release_date: parseDate(data.release_date),
       };
     }
 
     return null;
   } catch (error) {
-    console.error("Error fetching PlayStation game details from API:", error);
+    log.error("Error fetching PlayStation game details from API", { error });
     return null;
   }
 }
@@ -185,23 +176,8 @@ export async function scrapePsGameDetails(
   const browser = await getBrowser();
 
   try {
-    if (!browser) {
-      throw new Error("Browser not found");
-    }
-
-    const page = await browser.newPage();
-    await page.setViewport({
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 1,
-    });
-    page.setDefaultNavigationTimeout(0);
+    const page = await newPage(browser);
     await page.goto(`https://store.playstation.com/en-gb/product/${gameId}/`);
-    await page.setViewport({
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 1,
-    });
     await page.waitForSelector("script", { timeout: 2000 });
 
     // Extract media (images and game name)
@@ -212,7 +188,11 @@ export async function scrapePsGameDetails(
           scriptTag.innerHTML.includes("media") &&
           scriptTag.innerHTML.includes("cache")
         ) {
-          return JSON.parse(scriptTag.innerHTML) as GameMediaData;
+          try {
+            return JSON.parse(scriptTag.innerHTML) as GameMediaData;
+          } catch {
+            // Not the JSON payload, keep looking
+          }
         }
       }
       return null;
@@ -230,9 +210,8 @@ export async function scrapePsGameDetails(
         ) {
           try {
             return JSON.parse(scriptTag.innerHTML) as GameDetailsData;
-          } catch (e) {
-            console.log(e, "Error parsing game details");
-            // Continue if parse fails
+          } catch {
+            // Not the JSON payload, keep looking
           }
         }
       }
@@ -250,9 +229,8 @@ export async function scrapePsGameDetails(
         if (scriptTag.innerHTML.includes("price")) {
           try {
             return JSON.parse(scriptTag.innerHTML) as GamePriceData;
-          } catch (e) {
-            console.log(e, "Error parsing game price");
-            // Continue if parse fails
+          } catch {
+            // Not the JSON payload, keep looking
           }
         }
       }
@@ -298,12 +276,12 @@ export async function scrapePsGameDetails(
     }
 
     // Extract other details
-    const releaseDate = new Date(
-      gameDetailsRaw.cache[productKey]?.releaseDate ?? new Date().toISOString(),
+    const releaseDate = parseDate(
+      gameDetailsRaw.cache[productKey]?.releaseDate,
     );
     const publisher = gameDetailsRaw.cache[productKey]?.publisherName ?? "";
-    const platformIds = (gameDetailsRaw.cache[productKey]?.platforms ?? []).map(
-      (p: string) => p.toLowerCase(),
+    const platformIds = normalizePlatformIds(
+      gameDetailsRaw.cache[productKey]?.platforms ?? [],
     );
 
     // Check if game is free
@@ -322,7 +300,7 @@ export async function scrapePsGameDetails(
       release_date: releaseDate,
     };
   } catch (error) {
-    console.error("Error scraping PlayStation game details:", error);
+    log.error("Error scraping PlayStation game details", { error });
     return null;
   } finally {
     await browser.close();
@@ -330,7 +308,8 @@ export async function scrapePsGameDetails(
 }
 
 /**
- * Process a PlayStation Store URL to get full game details
+ * Process a PlayStation Store URL to get full game details.
+ * Callers decide whether the game has to be free (PS Plus games are not).
  */
 export async function processPlayStationGame(psUrl: string): Promise<{
   gameDetails: PlayStationGameDetails;
@@ -340,19 +319,18 @@ export async function processPlayStationGame(psUrl: string): Promise<{
     // Extract game ID from URL
     const gameIds = extractPsGameIds(psUrl);
 
-    if (gameIds.length === 0) {
+    // Get first game ID (we only process one game at a time)
+    const gameId = gameIds[0];
+    if (!gameId) {
       throw new Error("Could not extract game ID from URL");
     }
 
-    // Get first game ID (we only process one game at a time)
-    const gameId = gameIds[0];
+    // Try fetching from API first, then fall back to scraping the website
+    const gameDetails =
+      (await fetchPsApiGameDetails(gameId)) ??
+      (await scrapePsGameDetails(gameId));
 
-    // Try fetching from API first
-    let gameDetails = await fetchPsApiGameDetails(gameId ?? "");
-    console.log(gameDetails);
-    // If API fails, try scraping the website
-    gameDetails ??= await scrapePsGameDetails(gameId ?? "");
-    // If both methods fail or game is not free, return null
+    // If both methods fail, return null
     if (!gameDetails) {
       return null;
     }
@@ -370,7 +348,7 @@ export async function processPlayStationGame(psUrl: string): Promise<{
       endDate,
     };
   } catch (error) {
-    console.error("Error processing PlayStation game:", error);
+    log.error("Error processing PlayStation game", { error });
     return null;
   }
 }

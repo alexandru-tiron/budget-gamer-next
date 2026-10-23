@@ -1,4 +1,8 @@
-import { getBrowser } from "./puppeteer-helper";
+import { normalizePlatformIds } from "./platforms";
+import { delay, getBrowser, newPage } from "./puppeteer-helper";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "gog" });
 
 interface GogGameDetails {
   name: string;
@@ -13,24 +17,14 @@ interface GogGameDetails {
 }
 
 /**
- * Format a date to DD.MM.YYYY
+ * Parse the GOG giveaway countdown (e.g. "47 : 59 : 12") into milliseconds.
  */
-export function formatDate(date: number): string {
-  const d = new Date(date);
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const year = d.getFullYear();
+export function parseGogCountdown(text: string): number | null {
+  const match = /(\d+)\s*:\s*(\d+)\s*:\s*(\d+)/.exec(text);
+  if (!match) return null;
 
-  return [day, month, year].join(".");
-}
-
-/**
- * Delay execution for a specified time
- */
-function delay(time: number): Promise<void> {
-  return new Promise(function (resolve) {
-    setTimeout(resolve, time);
-  });
+  const [hours = 0, minutes = 0, seconds = 0] = match.slice(1).map(Number);
+  return hours * 3600000 + minutes * 60000 + seconds * 1000;
 }
 
 /**
@@ -41,29 +35,15 @@ export async function scrapeGogGamePage(url: string): Promise<{
   isFree: boolean;
   countdownMs: number | null;
 }> {
-  console.log("Starting GOG games scraping...");
-  console.log("Environment:", process.env.NODE_ENV);
+  log.info("Starting GOG game scraping...");
 
   const browser = await getBrowser();
 
-
   try {
-    if (!browser) {
-      throw new Error("Browser not found");
-    }
     // Open game page
-    const page = await browser.newPage();
-    await page.setUserAgent(
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/61.0.3163.100 Safari/537.36",
-    );
-    page.setDefaultNavigationTimeout(0);
+    const page = await newPage(browser);
     await page.goto(url, {
       waitUntil: "domcontentloaded",
-    });
-    await page.setViewport({
-      width: 1920,
-      height: 1080,
-      deviceScaleFactor: 1,
     });
 
     // Get game title
@@ -83,7 +63,7 @@ export async function scrapeGogGamePage(url: string): Promise<{
         return textElement?.textContent ?? "";
       });
     } catch (error) {
-      console.log(error, "Title not found");
+      log.debug("Title not found", { error });
     }
 
     // Check if game is free
@@ -100,21 +80,13 @@ export async function scrapeGogGamePage(url: string): Promise<{
         return textGiveaway.textContent === "Go to giveaway";
       });
     } catch (error) {
-      console.log(error, "Game couldn't be found to be free");
+      log.debug("Game couldn't be found to be free", { error });
     }
 
     // Get countdown timer if game is free
     let countdownMs = null;
     if (isFree) {
-      const descPage = await browser.newPage();
-      await descPage.setViewport({
-        width: 1920,
-        height: 1080,
-        deviceScaleFactor: 1,
-      });
-      await descPage.setUserAgent(
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
-      );
+      const descPage = await newPage(browser);
       await descPage.goto("https://www.gog.com/#giveaway", {
         waitUntil: "domcontentloaded",
       });
@@ -123,18 +95,12 @@ export async function scrapeGogGamePage(url: string): Promise<{
       try {
         await descPage.hover(".main-footer");
         await descPage.waitForSelector(".giveaway__countdown");
-        countdownMs = await descPage.evaluate(() => {
-          const timeLeftEl = document.querySelector(".giveaway__countdown");
-          if (!timeLeftEl?.textContent) return null;
-
-          const timeLeft = timeLeftEl.textContent;
-          const hour = parseInt(timeLeft.slice(0, 2));
-          const minutes = parseInt(timeLeft.slice(5, 7));
-          const seconds = parseInt(timeLeft.slice(10, 12));
-          return hour * 3600000 + minutes * 60000 + seconds * 1000;
-        });
+        const timeLeft = await descPage.evaluate(
+          () => document.querySelector(".giveaway__countdown")?.textContent,
+        );
+        countdownMs = timeLeft ? parseGogCountdown(timeLeft) : null;
       } catch (error) {
-        console.log(error, "Countdown timer not found");
+        log.debug("Countdown timer not found", { error });
       }
 
       await descPage.close();
@@ -142,7 +108,7 @@ export async function scrapeGogGamePage(url: string): Promise<{
 
     await page.close();
 
-    return { gameTitle, isFree, countdownMs };
+    return { gameTitle: gameTitle.trim(), isFree, countdownMs };
   } finally {
     await browser.close();
   }
@@ -160,12 +126,12 @@ export async function searchGogGame(gameTitle: string): Promise<{
     const response = await fetch(
       `https://embed.gog.com/games/ajax/filtered?mediaType=game&search=${encodeURIComponent(gameTitle)}`,
     );
-    const data = await response.json() as {
+    const data = (await response.json()) as {
       totalGamesFound: number;
-      products: {
+      products?: {
         title: string;
         id: number;
-        price: {
+        price?: {
           discountPercentage: number;
         };
         supportedOperatingSystems: string[];
@@ -176,41 +142,26 @@ export async function searchGogGame(gameTitle: string): Promise<{
       }[];
     };
 
-    const gamesFound = data.totalGamesFound || 0;
+    const product = data.products?.find(
+      (product) => product.title === gameTitle,
+    );
+    if (!product) return null;
 
-    for (let i = 0; i < gamesFound; i++) {
-      const product = data.products[i];
-      if (product?.title === gameTitle) {
-        const gameId = product.id.toString();
-
-        const isFree = product.price?.discountPercentage === 100;
-
-        // Format platforms
-        const platforms = [...product.supportedOperatingSystems];
-        const macIndex = platforms.indexOf("mac");
-        if (macIndex !== -1) {
-          platforms[macIndex] = "mac_os";
-        }
-
-        return {
-          gameId,
-          isFree,
-          gameDetails: {
-            name: product.title,
-            cover: "https:" + product.image + ".jpg",
-            cover_portrait: "https:" + product.image + ".jpg",
-            developer: product.developer,
-            publisher: product.publisher,
-            platform_ids: platforms,
-            release_date: new Date(product.releaseDate * 1000),
-          },
-        };
-      }
-    }
-
-    return null;
+    return {
+      gameId: product.id.toString(),
+      isFree: product.price?.discountPercentage === 100,
+      gameDetails: {
+        name: product.title,
+        cover: "https:" + product.image + ".jpg",
+        cover_portrait: "https:" + product.image + ".jpg",
+        developer: product.developer,
+        publisher: product.publisher,
+        platform_ids: normalizePlatformIds(product.supportedOperatingSystems),
+        release_date: new Date(product.releaseDate * 1000),
+      },
+    };
   } catch (error) {
-    console.error("Error searching GOG game:", error);
+    log.error("Error searching GOG game", { error });
     return null;
   }
 }
@@ -223,11 +174,11 @@ export async function getGogGameDescription(gameId: string): Promise<string> {
     const response = await fetch(
       `https://api.gog.com/products/${gameId}?expand=description,screenshots`,
     );
-    const data = await response.json() as {
-      description: {
+    const data = (await response.json()) as {
+      description?: {
         full: string;
       };
-      screenshots: {
+      screenshots?: {
         url: string;
       }[];
     };
@@ -239,7 +190,7 @@ export async function getGogGameDescription(gameId: string): Promise<string> {
           .trim()
       : "";
   } catch (error) {
-    console.error("Error fetching GOG game description:", error);
+    log.error("Error fetching GOG game description", { error });
     return "";
   }
 }
@@ -297,7 +248,7 @@ export async function processGogGame(gogUrl: string): Promise<{
 
     return { gameDetails, endDate };
   } catch (error) {
-    console.error("Error processing GOG game:", error);
+    log.error("Error processing GOG game", { error });
     return null;
   }
 }

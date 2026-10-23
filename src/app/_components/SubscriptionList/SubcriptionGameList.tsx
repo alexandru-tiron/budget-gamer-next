@@ -1,10 +1,34 @@
 import type { SubscriptionGame } from "~/types/game";
 import SubGameCard from "./SubGameCard.tsx/SubGameCard";
 import Image from "next/image";
-const providerNames = {
-  amazon_games: "Amazon Games",
-  humble_bundle: "Humble Bundle",
-  playstation: "PlayStation Plus",
+import ScrollRow from "../common/ScrollRow";
+import { providerLogo } from "../common/labels";
+
+const SERVICES: Record<string, { name: string; description: string }> = {
+  amazon_games: {
+    name: "Amazon Games",
+    description: "Free with Prime Gaming this month",
+  },
+  humble_bundle: {
+    name: "Humble Bundle",
+    description: "This month's Humble Choice games",
+  },
+  playstation: {
+    name: "PlayStation Plus",
+    description: "This month's PlayStation Plus games",
+  },
+  xbox_game_pass: {
+    name: "Xbox Game Pass",
+    description: "Recently added to Game Pass",
+  },
+  xbox_free_play_days: {
+    name: "Xbox Free Play Days",
+    description: "Play the full games free this weekend",
+  },
+  nintendo_switch_online: {
+    name: "Nintendo Switch Online Game Trials",
+    description: "Members can play the full game free for a limited time",
+  },
 };
 
 export default function SubcriptionGameList({
@@ -16,25 +40,46 @@ export default function SubcriptionGameList({
   provider: string;
   type?: "normal" | "portrait";
 }) {
+  const headingId = `subscription-${provider}`;
+  const service = SERVICES[provider] ?? { name: provider, description: "" };
+
   return games.length === 0 ? null : (
-    <div className="flex flex-col gap-4 mb-4 lg:px-8">
-      <div className="flex items-center gap-2">
-        <Image
-          src={`/images/icons/provider_logos/logo_${provider}_black.svg`}
-          alt={provider}
-          width={16}
-          height={16}
-          className="h-5 w-auto"
-        />
-        <h2 className="text-2xl font-bold text-white">
-          {providerNames[provider as keyof typeof providerNames]}
-        </h2>
+    <section
+      aria-labelledby={headingId}
+      className="animate-fade-up flex flex-col gap-2"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="bg-surface flex size-11 shrink-0 items-center justify-center rounded-xl ring-1 ring-white/10">
+            <Image
+              src={providerLogo(provider)}
+              alt=""
+              width={24}
+              height={24}
+              className="h-6 w-auto max-w-8 object-contain"
+            />
+          </span>
+          <div>
+            <h2
+              id={headingId}
+              className="text-xl font-bold text-white md:text-2xl"
+            >
+              {service.name}
+            </h2>
+            <p className="text-sm text-gray-400">{service.description}</p>
+          </div>
+        </div>
+        <span className="bg-surface shrink-0 rounded-full px-3 py-1 text-xs font-medium text-gray-300 ring-1 ring-white/10">
+          {games.length === 1 ? "1 game" : `${games.length} games`}
+        </span>
       </div>
-      <div className="scrollbar-horizontal-styled flex w-full gap-4 overflow-x-auto pb-2 lg:px-4">
-        {games.map((game) => (
-          <SubGameCard key={game.id} game={game} type={type} />
+      <ScrollRow label={service.name}>
+        {games.map((game, index) => (
+          <li key={game.id} className="shrink-0 snap-start">
+            <SubGameCard game={game} type={type} index={index} />
+          </li>
         ))}
-      </div>
-    </div>
+      </ScrollRow>
+    </section>
   );
 }

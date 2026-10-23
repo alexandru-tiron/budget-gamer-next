@@ -13,7 +13,7 @@ Budget Gamer started as a vanilla JavaScript project using HTML, CSS, and Fireba
 
 ### Key Technology Changes
 
-- **Frontend**: Migrated from vanilla JS/HTML/CSS to Next.js 14 with App Router
+- **Frontend**: Migrated from vanilla JS/HTML/CSS to Next.js 16 with App Router
 - **Backend**: Replaced Firebase with:
   - Vercel for hosting and serverless functions
   - Neon DB instead of Firebase Realtime Database
@@ -46,9 +46,9 @@ Budget Gamer started as a vanilla JavaScript project using HTML, CSS, and Fireba
 
 ### Prerequisites
 
-- Node.js 18+
-- pnpm (recommended) or npm
-- A Neon DB account
+- Node.js 22.19+
+- npm
+- A Postgres database: a Neon DB account, or a local Postgres (for example via Docker)
 - A Vercel account (for deployment)
 
 ### Local Development
@@ -56,14 +56,14 @@ Budget Gamer started as a vanilla JavaScript project using HTML, CSS, and Fireba
 1. Clone the repository
 
 ```bash
-git clone https://github.com/AlexT8/budget-gamer-next.git
+git clone https://github.com/alexandru-tiron/budget-gamer-next.git
 cd budget-gamer-next
 ```
 
 2. Install dependencies
 
 ```bash
-pnpm install
+npm install
 ```
 
 3. Set up environment variables
@@ -74,25 +74,65 @@ cp .env.example .env
 
 Fill in your environment variables in the .env file.
 
+`DATABASE_URL` can point at Neon or at any Postgres server. Neon URLs (`*.neon.tech`) use Neon's
+serverless HTTP driver; every other URL uses a regular Postgres connection. Set `DATABASE_DRIVER`
+to `neon-http` or `postgres` to override this. To run Postgres locally in Docker, start the
+Compose `db` service; it matches the `DATABASE_URL` and `POSTGRES_PASSWORD` in `.env.example`:
+
+```bash
+docker compose up -d db
+```
+
+To run the whole app in Docker instead, with edits in `src/` syncing into the container, use
+`docker compose up --build --watch` and skip the next two steps (see
+[docs/self-hosting.md](docs/self-hosting.md#development-with-compose)).
+
 4. Set up the database
 
 ```bash
-pnpm db:push
+npm run db:migrate
 ```
 
 5. Run the development server
 
 ```bash
-pnpm dev
+npm run dev
 ```
 
 The app should now be running at http://localhost:3000
 
 ### Database Management
 
-- Generate migrations: `pnpm db:generate`
-- Push schema changes: `pnpm db:push`
-- View database: `pnpm db:studio`
+- Generate migrations: `npm run db:generate`
+- Apply migrations: `npm run db:migrate`
+- Push schema changes without a migration: `npm run db:push`
+- View database: `npm run db:studio`
+
+### API
+
+The tRPC procedures, cron endpoints and data types are documented in [docs/API.md](docs/API.md).
+
+### Checks
+
+- Lint, typecheck and unit tests: `npm run check`
+- Unit tests only: `npm test`
+- Database integration tests: `npm run test:db`
+- End-to-end tests: `npm run test:e2e`
+
+The database and end-to-end tests need a local Postgres database in `TEST_DATABASE_URL`
+(default: `postgresql://postgres:postgres@localhost:5432/budget_gamer_test`). They delete its
+data, so they refuse any host other than localhost. The end-to-end run migrates and seeds that
+database, builds the app and starts it on port 3100 (`E2E_PORT` changes it). Install the browser
+once with:
+
+```bash
+npx playwright install chromium
+```
+
+CI runs the lint, typecheck and unit tests on every push to `main` and on pull requests. A second
+job runs the database and end-to-end tests against a Postgres service container and uploads the
+Playwright report. A third builds the Docker images, starts the production Compose stack and
+smoke-tests it.
 
 ## Deployment
 
@@ -100,8 +140,35 @@ The easiest way to deploy Budget Gamer is using Vercel:
 
 1. Push your code to GitHub
 2. Import your repository in Vercel
-3. Add your environment variables
+3. Add your environment variables (`DATABASE_URL`, `REDDIT_AUTH_TOKEN`, `CRON_SECRET`, and optionally `CHROMIUM_PACK_URL` and `LOG_LEVEL`)
 4. Deploy!
+
+### Scheduled updates
+
+[vercel.json](vercel.json) defines two cron jobs, both served by `src/app/api/cron/[schedule]/route.ts`:
+
+- `/api/cron/daily` (midnight UTC): Reddit giveaway articles, Humble Choice, PlayStation Plus, Xbox Game Pass additions, Xbox Free Play Days, Xbox giveaways and Nintendo Switch Online Game Trials
+- `/api/cron/thursday` (19:05 UTC): Amazon Prime Gaming, Epic Games and the new Xbox Free Play Days
+
+Xbox and Nintendo use the European stores (Ireland, prices in EUR). What counts as free:
+
+- **Free games** (free to keep): Xbox and Nintendo eShop games whose price drops to €0 from a paid price. Nintendo rarely does this, so eShop games are only checked when someone submits a link.
+- **Timed**: Xbox Game Pass additions, Xbox Free Play Days weekends (some need Game Pass) and Nintendo Switch Online Game Trials. You can play these for a while but don't keep them.
+
+Vercel authenticates them with `CRON_SECRET`. After each run, the cron route revalidates the pages; they also regenerate at least once an hour.
+
+The scrapers use Puppeteer. Locally they use Puppeteer's bundled Chrome. On Vercel they use [`@sparticuz/chromium-min`](https://github.com/Sparticuz/chromium), which downloads a Chromium pack on cold start (set `CHROMIUM_PACK_URL` to host your own copy). The Docker image ships Debian's Chromium and points `CHROMIUM_EXECUTABLE_PATH` at it.
+
+### Self-hosting
+
+Budget Gamer also runs without Vercel. [docs/self-hosting.md](docs/self-hosting.md) covers:
+
+- **Docker Compose**: Postgres, migrations, the app and a cron scheduler on one machine (`docker compose -f compose.yaml up -d --build`)
+- **Docker image**: the [`Dockerfile`](Dockerfile)'s `production` and `migrate` targets
+- **Kubernetes**: a Kustomize base in [`deploy/kubernetes`](deploy/kubernetes) with a Deployment, Service, migration Job and CronJobs
+- **Custom server**: a standalone Node.js build behind systemd and a reverse proxy
+
+Health checks live at `/api/health` (liveness) and `/api/health/ready` (database reachable).
 
 ## TODO List
 
@@ -110,8 +177,8 @@ The easiest way to deploy Budget Gamer is using Vercel:
 - [x] Implement server-side rendering
 - [x] Add route pre-fetching
 - [x] Add loading states and skeletons
-- [ ] Optimize bundle size
-- [ ] Add service worker for offline support
+- [x] Optimize bundle size
+- [x] Add service worker for offline support
 
 ### Features
 
@@ -119,15 +186,15 @@ The easiest way to deploy Budget Gamer is using Vercel:
   - [x] Steam Store
   - [x] Epic Games Store
   - [x] PlayStation Store (PS Plus)
-  - [ ] Xbox Store
-  - [ ] Nintendo eShop
+  - [x] Xbox Store
+  - [x] Nintendo eShop
   - [x] GOG
-  - [ ] Origin
 - [x] Add subscription-based game tracking:
   - [x] PlayStation Plus
   - [x] Amazon Prime
   - [x] Humble Bundle
-  - [ ] Nintendo Online
+  - [x] Nintendo Online
+  - [x] Xbox Game Pass and Free Play Days
 - [x] Add dark mode support
 - [x] Add responsive design
 - [ ] Add authentication system
@@ -144,12 +211,12 @@ The easiest way to deploy Budget Gamer is using Vercel:
 - [x] Configure Drizzle ORM
 - [x] Add TypeScript support
 - [x] Add Vercel cron jobs for regular updates
-- [ ] Implement error handling
-- [ ] Add logging system
+- [x] Implement error handling
+- [x] Add logging system
 - [ ] Set up monitoring and analytics
-- [ ] Add end-to-end testing
-- [ ] Improve TypeScript strictness
-- [ ] Add API documentation
+- [x] Add end-to-end testing
+- [x] Improve TypeScript strictness
+- [x] Add API documentation
 
 ### UI/UX
 
@@ -159,9 +226,9 @@ The easiest way to deploy Budget Gamer is using Vercel:
 - [x] Add social sharing functionality
 - [ ] Improve navigation
 - [ ] Add more interactive elements
-- [ ] Implement better loading states
+- [x] Implement better loading states
 - [ ] Add more animations (framer-motion)
-- [ ] Improve accessibility
+- [x] Improve accessibility
 - [ ] Add more theme options
 
 ### Infrastructure
@@ -171,16 +238,16 @@ The easiest way to deploy Budget Gamer is using Vercel:
 - [x] Configure deployment pipeline
 - [x] Set up development environment
 - [ ] Add staging environment
-- [ ] Add automated testing in pipeline
-- [ ] Add Docker support:
-  - [ ] Create Dockerfile for the application
-  - [ ] Set up Docker Compose for local development
-  - [ ] Add container orchestration configuration
-  - [ ] Document self-hosting instructions
-- [ ] Add deployment options:
+- [x] Add automated testing in pipeline
+- [x] Add Docker support:
+  - [x] Create Dockerfile for the application
+  - [x] Set up Docker Compose for local development
+  - [x] Add container orchestration configuration
+  - [x] Document self-hosting instructions
+- [x] Add deployment options:
   - [x] Vercel deployment
-  - [ ] Docker container deployment
-  - [ ] Custom server deployment guide
+  - [x] Docker container deployment
+  - [x] Custom server deployment guide
 
 ## Contributing
 

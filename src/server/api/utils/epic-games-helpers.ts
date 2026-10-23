@@ -1,6 +1,8 @@
 import type { db } from "~/server/db";
-import { freeGames } from "~/server/db/schema";
-import { eq } from "drizzle-orm";
+import { logger } from "~/server/logger";
+import { upsertFreeGame } from "../services/freeGames-service";
+
+const log = logger.child({ scope: "epic-games" });
 
 interface EpicGameDetails {
   name: string;
@@ -17,7 +19,7 @@ interface EpicGameDetails {
   release_date: Date;
 }
 
-// Epic Games API response types
+// Epic Games API response types. Optional fields are ones the API leaves out for some games.
 interface EpicGamePromotion {
   startDate: string;
   endDate: string;
@@ -27,10 +29,10 @@ interface EpicGamePromotion {
 }
 
 interface EpicGamePromotions {
-  promotionalOffers: Array<{
+  promotionalOffers?: Array<{
     promotionalOffers: EpicGamePromotion[];
   }>;
-  upcomingPromotionalOffers: Array<{
+  upcomingPromotionalOffers?: Array<{
     promotionalOffers: EpicGamePromotion[];
   }>;
 }
@@ -44,7 +46,7 @@ interface EpicGameMapping {
 }
 
 interface EpicGameCatalogNs {
-  mappings: EpicGameMapping[];
+  mappings?: EpicGameMapping[] | null;
 }
 
 interface EpicGamePrice {
@@ -61,12 +63,12 @@ interface EpicGame {
   title: string;
   description: string;
   effectiveDate: string;
-  productSlug?: string;
+  productSlug?: string | null;
   catalogNs: EpicGameCatalogNs;
-  keyImages: EpicGameImage[];
+  keyImages?: EpicGameImage[];
   price: EpicGamePrice;
   seller: EpicGameSeller;
-  promotions?: EpicGamePromotions;
+  promotions?: EpicGamePromotions | null;
 }
 
 interface EpicGamesResponse {
@@ -112,23 +114,13 @@ export async function fetchEpicFreeGames(): Promise<EpicGameDetails[]> {
       let isFree = false;
       let isAvailable = false;
 
-      // Check for current promotional offers
-      if (game.promotions?.promotionalOffers?.length > 0) {
-        const promo =
-          game.promotions.promotionalOffers[0]?.promotionalOffers[0];
-        if (promo && promo.discountSetting.discountPercentage !== null) {
-          startDate = new Date(promo.startDate);
-          endDate = new Date(promo.endDate);
-        }
-      }
-      // Check for upcoming promotional offers
-      else if (game.promotions?.upcomingPromotionalOffers?.length > 0) {
-        const promo =
-          game.promotions.upcomingPromotionalOffers[0]?.promotionalOffers[0];
-        if (promo && promo.discountSetting.discountPercentage !== null) {
-          startDate = new Date(promo.startDate);
-          endDate = new Date(promo.endDate);
-        }
+      // Prefer current promotional offers, then upcoming ones
+      const promo =
+        game.promotions.promotionalOffers?.[0]?.promotionalOffers[0] ??
+        game.promotions.upcomingPromotionalOffers?.[0]?.promotionalOffers[0];
+      if (promo && promo.discountSetting.discountPercentage !== null) {
+        startDate = new Date(promo.startDate);
+        endDate = new Date(promo.endDate);
       }
 
       // If no valid dates found, skip this game
@@ -147,16 +139,10 @@ export async function fetchEpicFreeGames(): Promise<EpicGameDetails[]> {
       // Skip if not free or not available
       if (!isFree || !isAvailable) continue;
 
-      // Get provider URL
-      let providerUrl = "";
-      if (game.productSlug) {
-        providerUrl = `https://store.epicgames.com/en-US/p/${game.productSlug}`;
-      } else if (game.catalogNs.mappings.length > 0) {
-        providerUrl = `https://store.epicgames.com/en-US/p/${game.catalogNs.mappings[0]?.pageSlug}`;
-      }
-
-      // Skip if no provider URL
-      if (!providerUrl) continue;
+      // Get provider URL, skipping games without a store page
+      const slug = game.productSlug ?? game.catalogNs.mappings?.[0]?.pageSlug;
+      if (!slug) continue;
+      const providerUrl = `https://store.epicgames.com/en-US/p/${slug}`;
 
       // Get images
       const cover = game.keyImages?.[0]?.url;
@@ -184,7 +170,7 @@ export async function fetchEpicFreeGames(): Promise<EpicGameDetails[]> {
 
     return epicGames;
   } catch (error) {
-    console.error("Error fetching Epic Games:", error);
+    log.error("Error fetching Epic Games", { error });
     throw error;
   }
 }
@@ -215,53 +201,24 @@ export async function processEpicGames(dbInstance: typeof db): Promise<{
     // Process each game
     for (const game of epicGames) {
       try {
-        // Check if game already exists
-        const existingGame = await dbInstance.query.freeGames.findFirst({
-          where: eq(freeGames.provider_url, game.provider_url),
+        // Add the game, or update it if it was already listed
+        const outcome = await upsertFreeGame(dbInstance, {
+          cover: game.cover.replace(/ /g, "%20"),
+          cover_portrait: game.cover_portrait.replace(/ /g, "%20"),
+          free: game.is_free,
+          description: game.description,
+          developer: game.developer,
+          start_date: game.start_date,
+          end_date: game.end_date,
+          name: game.name,
+          platform_ids: game.platform_ids,
+          provider_id: "epic_games",
+          provider_url: game.provider_url.replace(/ /g, "%20"),
+          publisher: game.publisher,
+          release_date: game.release_date,
         });
 
-        if (existingGame) {
-          // Update existing game
-          await dbInstance
-            .update(freeGames)
-            .set({
-              cover: game.cover.replace(/ /g, "%20"),
-              cover_portrait: game.cover_portrait.replace(/ /g, "%20"),
-              free: game.is_free,
-              description: game.description,
-              developer: game.developer,
-              start_date: game.start_date,
-              end_date: game.end_date,
-              name: game.name,
-              platform_ids: game.platform_ids,
-              provider_id: "epic_games",
-              provider_url: game.provider_url.replace(/ /g, "%20"),
-              publisher: game.publisher,
-              release_date: game.release_date,
-            })
-            .where(eq(freeGames.id, existingGame.id));
-
-          results.updated++;
-        } else {
-          // Add new game
-          await dbInstance.insert(freeGames).values({
-            cover: game.cover.replace(/ /g, "%20"),
-            cover_portrait: game.cover_portrait.replace(/ /g, "%20"),
-            free: game.is_free,
-            description: game.description,
-            developer: game.developer,
-            start_date: game.start_date,
-            end_date: game.end_date,
-            name: game.name,
-            platform_ids: game.platform_ids,
-            provider_id: "epic_games",
-            provider_url: game.provider_url.replace(/ /g, "%20"),
-            publisher: game.publisher,
-            release_date: game.release_date,
-          });
-
-          results.added++;
-        }
+        results[outcome]++;
       } catch (error) {
         results.failed++;
         const errorMessage =
@@ -272,7 +229,7 @@ export async function processEpicGames(dbInstance: typeof db): Promise<{
 
     return results;
   } catch (error) {
-    console.error("Error processing Epic Games:", error);
+    log.error("Error processing Epic Games", { error });
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error";
     throw new Error(`Failed to process Epic Games: ${errorMessage}`);

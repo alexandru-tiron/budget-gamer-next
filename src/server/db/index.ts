@@ -1,23 +1,27 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call */
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
-
 import { env } from "~/env";
-import * as schema from "./schema";
-// import ws from "ws";
-// neonConfig.webSocketConstructor = ws;
+import {
+  connectDatabase,
+  resolveDatabaseDriver,
+  type DatabaseConnection,
+} from "./drivers";
+
+export type { Database, DatabaseDriver } from "./drivers";
+
 /**
- * Cache the database connection in development. This avoids creating a new connection on every HMR
- * update.
+ * Cache the database connection in development. This avoids creating a new connection pool on
+ * every HMR update.
  */
-// const globalForDb = globalThis as unknown as {
-//   conn: neon.NeonClient | undefined;
-// };
+const globalForDb = globalThis as unknown as {
+  connection: DatabaseConnection | undefined;
+};
 
-// const conn = globalForDb.conn ?? neon(env.DATABASE_URL);
-// if (env.NODE_ENV !== "production") globalForDb.conn = conn;
+const connection =
+  globalForDb.connection ??
+  connectDatabase(
+    env.DATABASE_URL,
+    resolveDatabaseDriver(env.DATABASE_URL, env.DATABASE_DRIVER),
+  );
+if (env.NODE_ENV !== "production") globalForDb.connection = connection;
 
-// Create database connection
-const sql = neon(env.DATABASE_URL);
-
-export const db = drizzle({ schema, client: sql });
+export const db = connection.db;
+export const databaseDriver = connection.driver;

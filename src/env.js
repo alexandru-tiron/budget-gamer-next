@@ -8,11 +8,19 @@ export const env = createEnv({
    */
   server: {
     DATABASE_URL: z.string().url(),
+    // Defaults to neon-http for *.neon.tech hosts and postgres for everything else
+    DATABASE_DRIVER: z.enum(["neon-http", "postgres"]).optional(),
     NODE_ENV: z
       .enum(["development", "test", "production"])
       .default("development"),
     REDDIT_AUTH_TOKEN: z.string(),
     CRON_SECRET: z.string(),
+    CHROMIUM_PACK_URL: z.string().url().optional(),
+    // Use an installed Chromium instead of downloading one (set in the Docker image)
+    CHROMIUM_EXECUTABLE_PATH: z.string().optional(),
+    // Docker images are built without a database, so pages render per request instead
+    BUILD_WITHOUT_DATABASE: z.enum(["0", "1"]).optional(),
+    LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).optional(),
   },
 
   /**
@@ -30,9 +38,14 @@ export const env = createEnv({
    */
   runtimeEnv: {
     DATABASE_URL: process.env.DATABASE_URL,
+    DATABASE_DRIVER: process.env.DATABASE_DRIVER,
     NODE_ENV: process.env.NODE_ENV,
     REDDIT_AUTH_TOKEN: process.env.REDDIT_AUTH_TOKEN,
     CRON_SECRET: process.env.CRON_SECRET,
+    CHROMIUM_PACK_URL: process.env.CHROMIUM_PACK_URL,
+    CHROMIUM_EXECUTABLE_PATH: process.env.CHROMIUM_EXECUTABLE_PATH,
+    BUILD_WITHOUT_DATABASE: process.env.BUILD_WITHOUT_DATABASE,
+    LOG_LEVEL: process.env.LOG_LEVEL,
     // NEXT_PUBLIC_CLIENTVAR: process.env.NEXT_PUBLIC_CLIENTVAR,
   },
   /**

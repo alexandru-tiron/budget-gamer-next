@@ -7,7 +7,7 @@ import {
   getDefaultCoverImage,
   isAllowedDomain,
 } from "../utils/url-helpers";
-import type { NeonHttpDatabase } from "drizzle-orm/neon-http";
+import type { Database } from "~/server/db/drivers";
 
 export interface ArticleCreateInput {
   title: string;
@@ -19,24 +19,11 @@ export interface ArticleCreateInput {
   end_date: Date;
 }
 
-export interface ArticleOutput {
-  id: number;
-  createdAt: Date;
-  updatedAt: Date | null;
-  title: string;
-  cover: string;
-  description: string;
-  link: string;
-  domain: string;
-  start_date: Date | null;
-  end_date: Date | null;
-}
-
 /**
  * Check if an article with this link already exists
  */
 export async function checkArticleExists(
-  db: NeonHttpDatabase<typeof schema>,
+  db: Database,
   link: string,
 ): Promise<boolean> {
   const existingArticle = await db.query.articles.findFirst({
@@ -50,7 +37,7 @@ export async function checkArticleExists(
  * Insert an article into the database
  */
 export async function createArticle(
-  db: NeonHttpDatabase<typeof schema>,
+  db: Database,
   data: ArticleCreateInput,
 ): Promise<{ success: true }> {
   await db.insert(schema.articles).values({
@@ -69,33 +56,30 @@ export async function createArticle(
 /**
  * Get available articles (current date is between start_date and end_date)
  */
-export async function getAvailableArticles(
-  db: NeonHttpDatabase<typeof schema>,
-): Promise<ArticleOutput[] | null> {
-  const articlesData = await db.query.articles.findMany({
+export async function getAvailableArticles(db: Database) {
+  return db.query.articles.findMany({
     where: (articles, { lte, gte, and }) =>
       and(
-        gte(articles.start_date, new Date()),
-        lte(articles.end_date, new Date()),
+        lte(articles.start_date, new Date()),
+        gte(articles.end_date, new Date()),
       ),
     orderBy: (articles, { asc }) => [asc(articles.end_date)],
   });
-
-  return articlesData ?? null;
 }
 
 /**
  * Process a URL to create an article
  */
 export async function processArticleFromUrl(
-  db: NeonHttpDatabase<typeof schema>,
+  db: Database,
   link: string,
 ): Promise<{ success: boolean; article?: ArticleCreateInput }> {
   // Check if URL is from allowed domains
   if (!isAllowedDomain(link)) {
     throw new TRPCError({
       code: "BAD_REQUEST",
-      message: "URL domain not allowed",
+      message:
+        "Links from that site aren't supported. Try Twitter/X, Reddit, Humble Bundle, Gleam or Facebook.",
     });
   }
 
@@ -104,7 +88,7 @@ export async function processArticleFromUrl(
   if (exists) {
     throw new TRPCError({
       code: "CONFLICT",
-      message: "Article already exists",
+      message: "That article has already been added.",
     });
   }
 

@@ -12,15 +12,17 @@ import {
   createArticle,
   getAvailableArticles,
   processArticleFromUrl,
-  type ArticleCreateInput,
 } from "../services/article-service";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "articles" });
 
 // Create the router with procedures
 export const articlesRouter = createTRPCRouter({
   // Public procedure - get all available articles
   getAvailableArticles: publicProcedure.query(async ({ ctx }) => {
     return getAvailableArticles(ctx.db);
-  }),  
+  }),
 
   // Internal procedure - create an article directly
   createArticleInternal: internalProcedure
@@ -37,14 +39,18 @@ export const articlesRouter = createTRPCRouter({
     )
     .mutation(async ({ ctx, input }) => {
       // This procedure can only be called from server-side code
-      return createArticle(ctx.db, input as ArticleCreateInput);
+      return createArticle(ctx.db, input);
     }),
 
   // Public procedure - validate and create an article from a URL
   validateAndCreateArticle: publicProcedure
     .input(
       z.object({
-        link: z.string().url().regex(URL_PATTERN, "Invalid URL format"),
+        link: z
+          .string()
+          .url()
+          .max(2048)
+          .regex(URL_PATTERN, "Invalid URL format"),
       }),
     )
     .mutation(async ({ ctx, input }) => {
@@ -56,7 +62,7 @@ export const articlesRouter = createTRPCRouter({
           throw error;
         }
 
-        console.error("Error creating article:", error);
+        log.error("Error creating article", { error });
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
           message: "Failed to create article",

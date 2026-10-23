@@ -5,10 +5,10 @@ export default function GDPRPanel() {
     <>
       <SidePanelHeader title="GDPR" />
       <div className="h-full bg-[#141314] p-4 text-white">
-        <h2 className="mb-2 text-xl font-medium text-[#684ace]">
+        <h2 className="mb-2 text-xl font-medium text-[#8f73e8]">
           Privacy Policy
         </h2>
-        <p className="mb-6 text-sm text-gray-500">Updated at 2022-10-01</p>
+        <p className="mb-6 text-sm text-gray-400">Updated at 2022-10-01</p>
         <div className="space-y-4 text-sm font-light">
           <p>
             Budget Gamer (&quot;we,&quot; &quot;our,&quot; or &quot;us&quot;) is
@@ -16,14 +16,14 @@ export default function GDPRPanel() {
             how your personal information is collected, used, and disclosed by
             Budget Gamer.
           </p>
-          <h3 className="text-lg font-medium text-[#684ace]">
+          <h3 className="text-lg font-medium text-[#8f73e8]">
             What Information Do We Collect?
           </h3>
           <p>
             We collect information from you when you visit our app, register or
             subscribe to our services.
           </p>
-          <h3 className="text-lg font-medium text-[#684ace]">
+          <h3 className="text-lg font-medium text-[#8f73e8]">
             How Do We Use The Information We Collect?
           </h3>
           <p>
@@ -49,14 +49,14 @@ export default function GDPRPanel() {
               To administer a contest, promotion, survey or other site feature
             </li>
           </ul>
-          <h3 className="text-lg font-medium text-[#684ace]">Contact Us</h3>
+          <h3 className="text-lg font-medium text-[#8f73e8]">Contact Us</h3>
           <p>Don&apos;t hesitate to contact us if you have any questions.</p>
           <ul className="list-disc space-y-2 pl-6">
             <li>
               Via Email:{" "}
               <a
                 href="mailto:contact@budgetgamer.app"
-                className="text-[#684ace]"
+                className="text-[#8f73e8]"
               >
                 contact@budgetgamer.app
               </a>

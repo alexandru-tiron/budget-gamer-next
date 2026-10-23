@@ -6,11 +6,14 @@
  * TL;DR - This is where all the tRPC server stuff is created and plugged in. The pieces you will
  * need to use are documented accordingly near the end.
  */
-import { initTRPC } from "@trpc/server";
+import { initTRPC, TRPCError } from "@trpc/server";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
 import { db } from "~/server/db";
+import { logger } from "~/server/logger";
+
+const log = logger.child({ scope: "trpc" });
 
 /**
  * 1. CONTEXT
@@ -91,12 +94,11 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 
   const result = await next();
 
-  const end = Date.now();
-  console.log(`[TRPC] ${path} took ${end - start}ms to execute`);
+  // Debug level, so it only shows up in development unless LOG_LEVEL=debug
+  log.debug("Procedure executed", { path, durationMs: Date.now() - start });
 
   return result;
 });
-
 
 /**
  * Public (unauthenticated) procedure
@@ -108,13 +110,15 @@ const timingMiddleware = t.middleware(async ({ next, path }) => {
 export const publicProcedure = t.procedure.use(timingMiddleware);
 
 /**
- * Internal procedure that can only be called by other procedures or server-side code.
- * It cannot be called directly from client components.
+ * Internal procedure that can only be called by trusted server-side code (e.g. the cron route),
+ * which creates its caller with `__internal: true`. HTTP and RSC callers are always rejected.
  */
-export const internalProcedure = t.procedure.use((opts)=>{
-  if(opts.ctx.__internal){
-    return opts.next({ctx: opts.ctx});
-  }else{
-    throw new Error("This procedure can only be called by other procedures or server-side code.");
+export const internalProcedure = t.procedure.use((opts) => {
+  if (!opts.ctx.__internal) {
+    throw new TRPCError({
+      code: "FORBIDDEN",
+      message: "This procedure can only be called by server-side code.",
+    });
   }
+  return opts.next({ ctx: opts.ctx });
 });
